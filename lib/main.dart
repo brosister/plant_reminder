@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -19,6 +21,8 @@ import 'plant_sync_service.dart';
 import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
 import 'sync_state_service.dart';
+
+const double _bottomOverlaySafePadding = 164;
 
 void main() {
   runApp(const PlantReminderApp());
@@ -52,7 +56,9 @@ class PlantReminderApp extends StatelessWidget {
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
         ),
         bottomSheetTheme: const BottomSheetThemeData(
           backgroundColor: Color(0xFFF6FBF7),
@@ -61,18 +67,28 @@ class PlantReminderApp extends StatelessWidget {
         cardTheme: CardThemeData(
           color: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
         ),
         timePickerTheme: TimePickerThemeData(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-          hourMinuteShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          dayPeriodShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          hourMinuteShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          dayPeriodShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
         ),
         datePickerTheme: DatePickerThemeData(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
         ),
         useMaterial3: true,
       ),
@@ -184,6 +200,18 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await _syncCurrentStateIfLinked();
   }
 
+  Future<void> _togglePinnedHomePlant(PlantItem plant) async {
+    setState(() {
+      _settings = _settings.copyWith(
+        pinnedHomePlantId: _settings.pinnedHomePlantId == plant.id
+            ? null
+            : plant.id,
+        clearPinnedHomePlantId: _settings.pinnedHomePlantId == plant.id,
+      );
+    });
+    await _persistSettingsOnly();
+  }
+
   Future<void> _restoreCloudDataIfNeeded(AppAuthUser user) async {
     try {
       final profile = await PlantSyncService.fetchProfile(user);
@@ -202,13 +230,19 @@ class _PlantRootPageState extends State<PlantRootPage> {
       }
 
       final hasLocalData = _plants.isNotEmpty;
-      final serverNewer = profile.updatedAt != null &&
+      final serverNewer =
+          profile.updatedAt != null &&
           sameUser &&
           syncState.lastSyncedAt != null &&
           profile.updatedAt!.isAfter(syncState.lastSyncedAt!);
 
       if (!hasLocalData || (sameUser && !syncState.isDirty && serverNewer)) {
-        await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+        await _applySyncedData(
+          user,
+          profile.plants,
+          profile.settings,
+          profile.updatedAt,
+        );
       }
     } catch (_) {
       // Keep local data when cloud sync is unavailable during bootstrap.
@@ -264,6 +298,19 @@ class _PlantRootPageState extends State<PlantRootPage> {
     _showToast(AppLocalizations.of(context).wateredToast(plant.name));
   }
 
+  void _markPlantsWatered(List<PlantItem> plants) {
+    if (plants.isEmpty) return;
+    setState(() {
+      final wateredAt = DateTime.now();
+      for (final plant in plants) {
+        plant.lastWateredAt = wateredAt;
+      }
+    });
+    _persistPlants();
+    AdService.showInterstitialIfNeeded();
+    _showToast('과제 ${plants.length}개를 처리했어요');
+  }
+
   void _savePlant(PlantItem plant, {bool isNew = false}) {
     setState(() {
       if (isNew) {
@@ -296,7 +343,8 @@ class _PlantRootPageState extends State<PlantRootPage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => PlantEditSheet(existing: plant.copy(), presets: _plantPresets),
+      builder: (context) =>
+          PlantEditSheet(existing: plant.copy(), presets: _plantPresets),
     );
     if (updated != null) {
       _savePlant(updated);
@@ -352,19 +400,35 @@ class _PlantRootPageState extends State<PlantRootPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l10n.syncChoiceTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                Text(
+                  l10n.syncChoiceTitle,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 10),
-                Text(l10n.syncChoiceBody, style: const TextStyle(color: Colors.black54, height: 1.5)),
+                Text(
+                  l10n.syncChoiceBody,
+                  style: const TextStyle(color: Colors.black54, height: 1.5),
+                ),
                 const SizedBox(height: 16),
-                _SyncSummaryCard(title: l10n.syncDeviceSummary, plantCount: _plants.length),
+                _SyncSummaryCard(
+                  title: l10n.syncDeviceSummary,
+                  plantCount: _plants.length,
+                ),
                 const SizedBox(height: 10),
-                _SyncSummaryCard(title: l10n.syncServerSummary, plantCount: profile.plants.length),
+                _SyncSummaryCard(
+                  title: l10n.syncServerSummary,
+                  plantCount: profile.plants.length,
+                ),
                 const SizedBox(height: 18),
                 _SyncChoiceButton(
                   title: l10n.syncUseServer,
                   subtitle: l10n.syncChoiceServerHint,
                   accent: const Color(0xFF4C8BF5),
-                  onTap: () => Navigator.of(context).pop(_SyncResolution.server),
+                  onTap: () =>
+                      Navigator.of(context).pop(_SyncResolution.server),
                 ),
                 const SizedBox(height: 10),
                 _SyncChoiceButton(
@@ -414,13 +478,20 @@ class _PlantRootPageState extends State<PlantRootPage> {
           if (!mounted || resolution == null) return;
           switch (resolution) {
             case _SyncResolution.server:
-              await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+              await _applySyncedData(
+                user,
+                profile.plants,
+                profile.settings,
+                profile.updatedAt,
+              );
               syncToast = l10n.syncImported;
               break;
             case _SyncResolution.local:
               final uploaded = await PlantSyncService.replaceWithLocal(
                 user: user,
-                plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+                plants: List<PlantItem>.from(
+                  _plants.map((item) => item.copy()),
+                ),
                 settings: _settings,
               );
               await SyncStateService.markSynced(user, uploaded.updatedAt);
@@ -429,15 +500,27 @@ class _PlantRootPageState extends State<PlantRootPage> {
             case _SyncResolution.merge:
               final merged = await PlantSyncService.mergeWithServer(
                 user: user,
-                localPlants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+                localPlants: List<PlantItem>.from(
+                  _plants.map((item) => item.copy()),
+                ),
                 localSettings: _settings,
               );
-              await _applySyncedData(user, merged.plants, merged.settings, merged.updatedAt);
+              await _applySyncedData(
+                user,
+                merged.plants,
+                merged.settings,
+                merged.updatedAt,
+              );
               syncToast = l10n.syncMerged;
               break;
           }
         } else if (profile.exists && !hasLocalData) {
-          await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+          await _applySyncedData(
+            user,
+            profile.plants,
+            profile.settings,
+            profile.updatedAt,
+          );
           syncToast = l10n.syncImported;
         } else if (!profile.exists && hasLocalData) {
           final uploaded = await PlantSyncService.replaceWithLocal(
@@ -451,7 +534,12 @@ class _PlantRootPageState extends State<PlantRootPage> {
         setState(() {
           _authUser = user;
         });
-        _showToast(syncToast ?? l10n.loginSuccessToast(user.provider == 'google' ? 'Google' : 'Apple'));
+        _showToast(
+          syncToast ??
+              l10n.loginSuccessToast(
+                user.provider == 'google' ? 'Google' : 'Apple',
+              ),
+        );
       }
     } catch (error) {
       if (!mounted) return;
@@ -504,17 +592,24 @@ class _PlantRootPageState extends State<PlantRootPage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final pages = [
-      HomeTab(plants: _plants, onTapPlant: _openPlantDetail, onMarkWatered: _markWatered),
-      MyPlantsTab(
+      HomeDashboardTab(
+        plants: _plants,
+        pinnedPlantId: _settings.pinnedHomePlantId,
+        onTapPlant: _openPlantDetail,
+        onMarkWatered: _markWatered,
+        onMarkAllWatered: _markPlantsWatered,
+      ),
+      OrganizedMyPlantsTab(
         plants: _plants,
         presets: _plantPresets,
         onTapPlant: _openPlantDetail,
+        onEditPlant: _openEditPlantSheet,
+        pinnedPlantId: _settings.pinnedHomePlantId,
+        onTogglePinnedPlant: _togglePinnedHomePlant,
         onAddPlant: _openAddPlantSheet,
       ),
       CalendarTab(plants: _plants),
@@ -548,6 +643,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       ),
     ];
     final activeNav = navItems[_currentIndex];
+    final isHomeTab = _currentIndex == 0;
     final bannerWidth = MediaQuery.sizeOf(context).width.truncate();
     if (_bannerWidth != bannerWidth && !_isBannerLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -556,26 +652,43 @@ class _PlantRootPageState extends State<PlantRootPage> {
     }
 
     return Scaffold(
+      extendBody: true,
+      extendBodyBehindAppBar: isHomeTab,
       appBar: AppBar(
         toolbarHeight: 92,
-        backgroundColor: const Color(0xFFF6FBF7),
+        backgroundColor: isHomeTab
+            ? Colors.transparent
+            : const Color(0xFFF6FBF7),
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
+        elevation: 0,
         titleSpacing: 20,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              activeNav.label,
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              activeNav.subtitle,
-              style: const TextStyle(color: Colors.black54, fontSize: 13, height: 1.3),
-            ),
-          ],
-        ),
+        title: isHomeTab
+            ? null
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    activeNav.label,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    activeNav.subtitle,
+                    maxLines: 2,
+                    softWrap: true,
+                    overflow: TextOverflow.visible,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 14),
@@ -587,39 +700,64 @@ class _PlantRootPageState extends State<PlantRootPage> {
           ),
         ],
       ),
-      body: SafeArea(child: pages[_currentIndex]),
-      floatingActionButton: _currentIndex == 1
-          ? FloatingActionButton(
-              onPressed: _openAddPlantSheet,
-              backgroundColor: const Color(0xFF2F855A),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              highlightElevation: 0,
-              hoverElevation: 0,
-              focusElevation: 0,
-              disabledElevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              child: const Icon(Icons.add_rounded, size: 30),
-            )
-          : null,
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
+      body: Stack(
         children: [
-          _GardenBottomNav(
-            items: navItems,
-            selectedIndex: _currentIndex,
-            onSelected: (value) => setState(() => _currentIndex = value),
-            extraBottomPadding: _bannerAd == null ? MediaQuery.of(context).viewPadding.bottom : 0,
+          Positioned.fill(
+            child: SafeArea(
+              top: !isHomeTab,
+              bottom: false,
+              child: pages[_currentIndex],
+            ),
           ),
-          if (_bannerAd != null)
-            Container(
-              width: double.infinity,
-              color: Colors.white,
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewPadding.bottom),
-              child: SizedBox(
-                width: double.infinity,
-                height: _bannerAd!.size.height.toDouble(),
-                child: AdWidget(ad: _bannerAd!),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _GardenBottomNav(
+                  items: navItems,
+                  selectedIndex: _currentIndex,
+                  onSelected: (value) => setState(() => _currentIndex = value),
+                  extraBottomPadding: _bannerAd == null
+                      ? MediaQuery.of(context).viewPadding.bottom
+                      : 0,
+                ),
+                if (_bannerAd != null)
+                  Container(
+                    width: double.infinity,
+                    color: Colors.transparent,
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewPadding.bottom,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: _bannerAd!.size.height.toDouble(),
+                      child: AdWidget(ad: _bannerAd!),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_currentIndex == 1)
+            Positioned(
+              right: 20,
+              bottom:
+                  (_bannerAd?.size.height.toDouble() ?? 0) +
+                  MediaQuery.of(context).viewPadding.bottom +
+                  108,
+              child: FloatingActionButton(
+                onPressed: _openAddPlantSheet,
+                backgroundColor: const Color(0xFF2F855A),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                highlightElevation: 0,
+                hoverElevation: 0,
+                focusElevation: 0,
+                disabledElevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(Icons.add_rounded, size: 30),
               ),
             ),
         ],
@@ -631,10 +769,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
 enum _SyncResolution { server, local, merge }
 
 class _SyncSummaryCard extends StatelessWidget {
-  const _SyncSummaryCard({
-    required this.title,
-    required this.plantCount,
-  });
+  const _SyncSummaryCard({required this.title, required this.plantCount});
 
   final String title;
   final int plantCount;
@@ -652,9 +787,15 @@ class _SyncSummaryCard extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+            child: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
-          Text('$plantCount', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+          Text(
+            '$plantCount',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+          ),
         ],
       ),
     );
@@ -690,9 +831,15 @@ class _SyncChoiceButton extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(color: Colors.black54, height: 1.4)),
+            Text(
+              subtitle,
+              style: const TextStyle(color: Colors.black54, height: 1.4),
+            ),
           ],
         ),
       ),
@@ -706,23 +853,39 @@ class HomeTab extends StatelessWidget {
     required this.plants,
     required this.onTapPlant,
     required this.onMarkWatered,
+    required this.onMarkAllWatered,
   });
 
   final List<PlantItem> plants;
   final ValueChanged<PlantItem> onTapPlant;
   final ValueChanged<PlantItem> onMarkWatered;
+  final ValueChanged<List<PlantItem>> onMarkAllWatered;
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final todayTasks = plants.where((plant) => plant.status == PlantStatus.today || plant.status == PlantStatus.overdue).toList();
-    final soonTasks = plants.where((plant) => plant.status == PlantStatus.soon).toList();
-    final healthyCount = plants.where((plant) => plant.status == PlantStatus.healthy).length;
+    final todayTasks = plants
+        .where(
+          (plant) =>
+              plant.status == PlantStatus.today ||
+              plant.status == PlantStatus.overdue,
+        )
+        .toList();
+    final soonTasks = plants
+        .where((plant) => plant.status == PlantStatus.soon)
+        .toList();
+    final healthyCount = plants
+        .where((plant) => plant.status == PlantStatus.healthy)
+        .length;
     final streakMessage = l10n.todayTaskStreak(todayTasks.isNotEmpty);
-    final primaryPlant = todayTasks.isNotEmpty ? todayTasks.first : (soonTasks.isNotEmpty ? soonTasks.first : (plants.isNotEmpty ? plants.first : null));
+    final primaryPlant = todayTasks.isNotEmpty
+        ? todayTasks.first
+        : (soonTasks.isNotEmpty
+              ? soonTasks.first
+              : (plants.isNotEmpty ? plants.first : null));
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 112),
       children: [
         Container(
           padding: const EdgeInsets.all(24),
@@ -759,12 +922,19 @@ class HomeTab extends StatelessWidget {
                       children: [
                         Text(
                           l10n.todayRoutine,
-                          style: const TextStyle(color: Color(0xFF66756C), fontSize: 13, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            color: Color(0xFF66756C),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           l10n.plantCount(plants.length),
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ],
                     ),
@@ -773,7 +943,9 @@ class HomeTab extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                todayTasks.isEmpty ? l10n.todayCareRelaxed : l10n.todayPlantsHeadline(todayTasks.length),
+                todayTasks.isEmpty
+                    ? l10n.todayCareRelaxed
+                    : l10n.todayPlantsHeadline(todayTasks.length),
                 style: const TextStyle(
                   color: Color(0xFF111A16),
                   fontSize: 28,
@@ -795,11 +967,26 @@ class HomeTab extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Expanded(child: _HomeMiniStat(label: l10n.todayTasks, value: l10n.highlightValueCount(todayTasks.length))),
+                    Expanded(
+                      child: _HomeMiniStat(
+                        label: l10n.todayTasks,
+                        value: l10n.highlightValueCount(todayTasks.length),
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Expanded(child: _HomeMiniStat(label: l10n.soonNeed, value: l10n.highlightValueCount(soonTasks.length))),
+                    Expanded(
+                      child: _HomeMiniStat(
+                        label: l10n.soonNeed,
+                        value: l10n.highlightValueCount(soonTasks.length),
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Expanded(child: _HomeMiniStat(label: l10n.healthyState, value: l10n.highlightValueCount(healthyCount))),
+                    Expanded(
+                      child: _HomeMiniStat(
+                        label: l10n.healthyState,
+                        value: l10n.highlightValueCount(healthyCount),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -809,16 +996,24 @@ class HomeTab extends StatelessWidget {
         const SizedBox(height: 20),
         _HomeOverviewCard(
           title: l10n.todayPriority,
-          value: todayTasks.isEmpty ? l10n.relaxed : l10n.priorityValue(todayTasks.length),
+          value: todayTasks.isEmpty
+              ? l10n.relaxed
+              : l10n.priorityValue(todayTasks.length),
           subtitle: todayTasks.isEmpty
               ? l10n.noUrgentPlants
-              : (primaryPlant == null ? l10n.recommendWateringNow : '${primaryPlant.name} · ${primaryPlant.location}'),
-          accent: todayTasks.isEmpty ? const Color(0xFF8AA39A) : const Color(0xFF2F855A),
+              : (primaryPlant == null
+                    ? l10n.recommendWateringNow
+                    : '${primaryPlant.name} · ${primaryPlant.location}'),
+          accent: todayTasks.isEmpty
+              ? const Color(0xFF8AA39A)
+              : const Color(0xFF2F855A),
         ),
         const SizedBox(height: 12),
         _HomeOverviewCard(
           title: l10n.nextCheck,
-          value: soonTasks.isEmpty ? l10n.stable : l10n.scheduledValue(soonTasks.length),
+          value: soonTasks.isEmpty
+              ? l10n.stable
+              : l10n.scheduledValue(soonTasks.length),
           subtitle: soonTasks.isEmpty
               ? l10n.nothingScheduled
               : '${soonTasks.first.name} · ${l10n.nextDateLabel(soonTasks.first.nextWateringAt)}',
@@ -838,12 +1033,18 @@ class HomeTab extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 20),
-        _SectionTitle(title: l10n.checkSoonPlants, subtitle: l10n.checkSoonPlantsHint),
+        _SectionTitle(
+          title: l10n.checkSoonPlants,
+          subtitle: l10n.checkSoonPlantsHint,
+        ),
         const SizedBox(height: 12),
         if (soonTasks.isEmpty)
           EmptyCard(message: l10n.noSoonPlants)
         else
-          ...soonTasks.map((plant) => CompactPlantCard(plant: plant, onTap: () => onTapPlant(plant))),
+          ...soonTasks.map(
+            (plant) =>
+                CompactPlantCard(plant: plant, onTap: () => onTapPlant(plant)),
+          ),
       ],
     );
   }
@@ -873,15 +1074,21 @@ class _MyPlantsTabState extends State<MyPlantsTab> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final sortedPlants = _sortPlantsByUrgency(widget.plants);
     final filteredPlants = _selectedStatus == null
-        ? widget.plants
-        : widget.plants.where((plant) => plant.status == _selectedStatus).toList();
+        ? sortedPlants
+        : sortedPlants
+              .where((plant) => plant.status == _selectedStatus)
+              .toList();
+    final urgentPlantsCount = widget.plants
+        .where((plant) => plant.status != PlantStatus.healthy)
+        .length;
 
     return Padding(
       padding: const EdgeInsets.all(20),
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 110),
-        itemCount: filteredPlants.length + 2,
+        itemCount: filteredPlants.length + 3,
         separatorBuilder: (context, index) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
@@ -901,14 +1108,22 @@ class _MyPlantsTabState extends State<MyPlantsTab> {
               },
             );
           }
-          final plant = filteredPlants[index - 2];
+          if (index == 2) {
+            return _MyPlantsPriorityCard(
+              urgentPlantsCount: urgentPlantsCount,
+              totalPlantsCount: filteredPlants.length,
+              isFiltered: _selectedStatus != null,
+            );
+          }
+          final plant = filteredPlants[index - 3];
           final matchedPreset = widget.presets.cast<PlantPreset?>().firstWhere(
-                (preset) => preset?.type == plant.type,
-                orElse: () => null,
-              );
+            (preset) => preset?.type == plant.type,
+            orElse: () => null,
+          );
           return PlantListCard(
             plant: plant,
             presetImageUrl: matchedPreset?.imageUrl,
+            priorityRank: _selectedStatus == null ? index - 2 : null,
             onTap: () => widget.onTapPlant(plant),
           );
         },
@@ -918,10 +1133,7 @@ class _MyPlantsTabState extends State<MyPlantsTab> {
 }
 
 class _MyPlantsIntroCard extends StatelessWidget {
-  const _MyPlantsIntroCard({
-    required this.guideText,
-    required this.onAddPlant,
-  });
+  const _MyPlantsIntroCard({required this.guideText, required this.onAddPlant});
 
   final String guideText;
   final VoidCallback onAddPlant;
@@ -952,7 +1164,10 @@ class _MyPlantsIntroCard extends StatelessWidget {
               style: const TextStyle(height: 1.4, color: Colors.black54),
             ),
           ),
-          IconButton.filledTonal(onPressed: onAddPlant, icon: const Icon(Icons.add_rounded)),
+          IconButton.filledTonal(
+            onPressed: onAddPlant,
+            icon: const Icon(Icons.add_rounded),
+          ),
         ],
       ),
     );
@@ -1015,6 +1230,92 @@ class _MyPlantsStatusFilterCard extends StatelessWidget {
   }
 }
 
+class _MyPlantsPriorityCard extends StatelessWidget {
+  const _MyPlantsPriorityCard({
+    required this.urgentPlantsCount,
+    required this.totalPlantsCount,
+    required this.isFiltered,
+  });
+
+  final int urgentPlantsCount;
+  final int totalPlantsCount;
+  final bool isFiltered;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final accent = urgentPlantsCount == 0
+        ? const Color(0xFF2F855A)
+        : const Color(0xFFDC2626);
+    final headline = urgentPlantsCount == 0
+        ? l10n.noUrgentPlants
+        : l10n.priorityValue(urgentPlantsCount);
+    final subtitle = isFiltered
+        ? l10n.statusFilterGuide
+        : (urgentPlantsCount == 0
+              ? l10n.todayTaskStreak(false)
+              : l10n.todayTodoHint);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: urgentPlantsCount == 0
+              ? const [Color(0xFFE8F6EC), Color(0xFFF6FBF8)]
+              : const [Color(0xFFFFE3DE), Color(0xFFFFF7F4)],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: accent.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(
+              urgentPlantsCount == 0
+                  ? Icons.spa_rounded
+                  : Icons.priority_high_rounded,
+              color: accent,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.todayPriority,
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  headline,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.black54, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          _HomeMiniStat(label: l10n.allPlants, value: '$totalPlantsCount'),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlantStatusFilterChip extends StatelessWidget {
   const _PlantStatusFilterChip({
     required this.label,
@@ -1040,10 +1341,14 @@ class _PlantStatusFilterChip extends StatelessWidget {
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.16) : color.withValues(alpha: 0.08),
+          color: isSelected
+              ? color.withValues(alpha: 0.16)
+              : color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: isSelected ? color.withValues(alpha: 0.45) : color.withValues(alpha: 0.18),
+            color: isSelected
+                ? color.withValues(alpha: 0.45)
+                : color.withValues(alpha: 0.18),
           ),
         ),
         child: Row(
@@ -1110,7 +1415,7 @@ class _CalendarTabState extends State<CalendarTab> {
       ..sort((a, b) => a.nextWateringAt.compareTo(b.nextWateringAt));
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: 90),
+      padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
       children: [
         LayoutBuilder(
           builder: (context, constraints) {
@@ -1135,7 +1440,10 @@ class _CalendarTabState extends State<CalendarTab> {
                     final month = _monthFromPage(index);
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _MonthCalendarCard(month: month, plants: widget.plants),
+                      child: _MonthCalendarCard(
+                        month: month,
+                        plants: widget.plants,
+                      ),
                     );
                   },
                 ),
@@ -1149,11 +1457,20 @@ class _CalendarTabState extends State<CalendarTab> {
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l10n.pageLabelManageMonth(_visibleMonth), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  l10n.pageLabelManageMonth(_visibleMonth),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 if (monthlyPlants.isEmpty)
                   Text(
@@ -1170,13 +1487,30 @@ class _CalendarTabState extends State<CalendarTab> {
                             width: 52,
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: _statusColor(plant.status).withValues(alpha: 0.15),
+                              color: _statusColor(
+                                plant.status,
+                              ).withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Column(
                               children: [
-                                Text('${plant.nextWateringAt.day}', style: TextStyle(color: _statusColor(plant.status), fontWeight: FontWeight.bold, fontSize: 18)),
-                                Text(l10n.weekdayShort(plant.nextWateringAt.weekday), style: TextStyle(color: _statusColor(plant.status), fontSize: 12)),
+                                Text(
+                                  '${plant.nextWateringAt.day}',
+                                  style: TextStyle(
+                                    color: _statusColor(plant.status),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                Text(
+                                  l10n.weekdayShort(
+                                    plant.nextWateringAt.weekday,
+                                  ),
+                                  style: TextStyle(
+                                    color: _statusColor(plant.status),
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -1185,13 +1519,27 @@ class _CalendarTabState extends State<CalendarTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(plant.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                Text(
+                                  plant.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                                 const SizedBox(height: 4),
-                                Text('${plant.type} · ${plant.location}', style: const TextStyle(color: Colors.black54)),
+                                Text(
+                                  '${plant.type} · ${plant.location}',
+                                  style: const TextStyle(color: Colors.black54),
+                                ),
                               ],
                             ),
                           ),
-                          Text(_statusText(plant.status), style: TextStyle(color: _statusColor(plant.status), fontWeight: FontWeight.w700)),
+                          Text(
+                            _statusText(plant.status),
+                            style: TextStyle(
+                              color: _statusColor(plant.status),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1219,20 +1567,18 @@ class _CalendarTabState extends State<CalendarTab> {
     final leadingEmpty = firstDay.weekday % 7;
     final daySlots = leadingEmpty + lastDay.day;
     final weekRows = (daySlots / 7).ceil();
-    const childAspectRatio = 0.76;
+    const childAspectRatio = 0.68;
     final cellWidth = width / 7;
     final cellHeight = cellWidth / childAspectRatio;
     final gridRows = weekRows + 1;
-    const topSectionHeight = 104.0;
-    return topSectionHeight + (cellHeight * gridRows);
+    const topSectionHeight = 136.0;
+    const bottomSpacing = 18.0;
+    return topSectionHeight + (cellHeight * gridRows) + bottomSpacing;
   }
 }
 
 class _MonthCalendarCard extends StatelessWidget {
-  const _MonthCalendarCard({
-    required this.month,
-    required this.plants,
-  });
+  const _MonthCalendarCard({required this.month, required this.plants});
 
   final DateTime month;
   final List<PlantItem> plants;
@@ -1248,10 +1594,19 @@ class _MonthCalendarCard extends StatelessWidget {
     final today = DateTime.now();
 
     final cells = <Widget>[
-      for (final label in <String>['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].asMap().entries.map((entry) {
-        const weekdayMap = [7, 1, 2, 3, 4, 5, 6];
-        return l10n.weekdayShort(weekdayMap[entry.key]);
-      }))
+      for (final label
+          in <String>[
+            'Sun',
+            'Mon',
+            'Tue',
+            'Wed',
+            'Thu',
+            'Fri',
+            'Sat',
+          ].asMap().entries.map((entry) {
+            const weekdayMap = [7, 1, 2, 3, 4, 5, 6];
+            return l10n.weekdayShort(weekdayMap[entry.key]);
+          }))
         Center(
           child: Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -1269,7 +1624,10 @@ class _MonthCalendarCard extends StatelessWidget {
       for (var day = 1; day <= lastDay.day; day++)
         _CalendarDayCell(
           date: DateTime(month.year, month.month, day),
-          isToday: today.year == month.year && today.month == month.month && today.day == day,
+          isToday:
+              today.year == month.year &&
+              today.month == month.month &&
+              today.day == day,
           dueCount: _dueCountForDay(DateTime(month.year, month.month, day)),
         ),
       for (var i = 0; i < trailingEmpty; i++) const SizedBox.shrink(),
@@ -1286,11 +1644,18 @@ class _MonthCalendarCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.calendar_today_rounded, size: 18, color: Color(0xFF2F855A)),
+              const Icon(
+                Icons.calendar_today_rounded,
+                size: 18,
+                color: Color(0xFF2F855A),
+              ),
               const SizedBox(width: 8),
               Text(
                 l10n.monthCalendarTitle(month),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -1304,7 +1669,7 @@ class _MonthCalendarCard extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisCount: 7,
-            childAspectRatio: 0.76,
+            childAspectRatio: 0.68,
             children: cells,
           ),
         ],
@@ -1315,7 +1680,9 @@ class _MonthCalendarCard extends StatelessWidget {
   int _dueCountForDay(DateTime target) {
     return plants.where((plant) {
       final next = plant.nextWateringAt;
-      return next.year == target.year && next.month == target.month && next.day == target.day;
+      return next.year == target.year &&
+          next.month == target.month &&
+          next.day == target.day;
     }).length;
   }
 }
@@ -1341,8 +1708,8 @@ class _CalendarDayCell extends StatelessWidget {
         color: isToday
             ? const Color(0xFF2F855A)
             : hasEvent
-                ? const Color(0xFFE7F7EE)
-                : Colors.white,
+            ? const Color(0xFFE7F7EE)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isToday ? const Color(0xFF2F855A) : const Color(0x11000000),
@@ -1364,7 +1731,9 @@ class _CalendarDayCell extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: isToday ? Colors.white.withValues(alpha: 0.2) : const Color(0xFF53B97C),
+                color: isToday
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : const Color(0xFF53B97C),
                 borderRadius: BorderRadius.circular(99),
               ),
               child: Text(
@@ -1400,16 +1769,33 @@ class StatsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final total = plants.length;
-    final healthy = plants.where((plant) => plant.status == PlantStatus.healthy).length;
-    final dueToday = plants.where((plant) => plant.status == PlantStatus.today).length;
-    final overdue = plants.where((plant) => plant.status == PlantStatus.overdue).length;
-    final avgCycle = plants.isEmpty ? 0 : (plants.map((plant) => plant.wateringCycleDays).reduce((a, b) => a + b) / plants.length).round();
-    final strongestPlant = plants.isEmpty ? null : ([...plants]..sort((a, b) => a.daysUntilWatering.compareTo(b.daysUntilWatering))).first;
+    final healthy = plants
+        .where((plant) => plant.status == PlantStatus.healthy)
+        .length;
+    final dueToday = plants
+        .where((plant) => plant.status == PlantStatus.today)
+        .length;
+    final overdue = plants
+        .where((plant) => plant.status == PlantStatus.overdue)
+        .length;
+    final avgCycle = plants.isEmpty
+        ? 0
+        : (plants
+                      .map((plant) => plant.wateringCycleDays)
+                      .reduce((a, b) => a + b) /
+                  plants.length)
+              .round();
+    final strongestPlant = plants.isEmpty
+        ? null
+        : ([...plants]..sort(
+                (a, b) => a.daysUntilWatering.compareTo(b.daysUntilWatering),
+              ))
+              .first;
 
     return Padding(
       padding: const EdgeInsets.all(20),
       child: ListView(
-        padding: const EdgeInsets.only(bottom: 90),
+        padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding + 56),
         children: [
           Container(
             padding: const EdgeInsets.all(22),
@@ -1422,21 +1808,40 @@ class StatsTab extends StatelessWidget {
               children: [
                 Text(
                   l10n.statsTitle,
-                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   strongestPlant == null
                       ? l10n.noPlantsYet
                       : l10n.overallStatsHint(strongestPlant.name),
-                  style: const TextStyle(color: Color(0xBFFFFFFF), height: 1.45),
+                  style: const TextStyle(
+                    color: Color(0xBFFFFFFF),
+                    height: 1.45,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 Row(
                   children: [
-                    Expanded(child: _DarkMetricTile(label: '등록 식물', value: l10n.registeredPlantsCount(total), accent: const Color(0xFF5BC0A5))),
+                    Expanded(
+                      child: _DarkMetricTile(
+                        label: '등록 식물',
+                        value: l10n.registeredPlantsCount(total),
+                        accent: const Color(0xFF5BC0A5),
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Expanded(child: _DarkMetricTile(label: '평균 주기', value: l10n.averageCycle(avgCycle), accent: const Color(0xFFFFD166))),
+                    Expanded(
+                      child: _DarkMetricTile(
+                        label: '평균 주기',
+                        value: l10n.averageCycle(avgCycle),
+                        accent: const Color(0xFFFFD166),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -1449,12 +1854,36 @@ class StatsTab extends StatelessWidget {
             mainAxisSpacing: 12,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 0.9,
+            childAspectRatio: 0.74,
             children: [
-              _SoftStatCard(title: l10n.healthyState, value: l10n.healthyKeep(healthy), detail: l10n.healthyDesc, color: const Color(0xFF2B9348), icon: Icons.favorite_rounded),
-              _SoftStatCard(title: l10n.todayWatering, value: l10n.dueTodayCount(dueToday), detail: l10n.todayDesc, color: const Color(0xFFF59E0B), icon: Icons.water_drop_rounded),
-              _SoftStatCard(title: l10n.overdue, value: l10n.overdueCount(overdue), detail: l10n.overdueDesc, color: const Color(0xFFDC2626), icon: Icons.crisis_alert_rounded),
-              _SoftStatCard(title: '전체 루틴', value: l10n.totalPlantsMetric(total), detail: '기록 중인 식물 수', color: const Color(0xFF2F855A), icon: Icons.local_florist_rounded),
+              _SoftStatCard(
+                title: l10n.healthyState,
+                value: l10n.healthyKeep(healthy),
+                detail: l10n.healthyDesc,
+                color: const Color(0xFF2B9348),
+                icon: Icons.favorite_rounded,
+              ),
+              _SoftStatCard(
+                title: l10n.todayWatering,
+                value: l10n.dueTodayCount(dueToday),
+                detail: l10n.todayDesc,
+                color: const Color(0xFFF59E0B),
+                icon: Icons.water_drop_rounded,
+              ),
+              _SoftStatCard(
+                title: l10n.overdue,
+                value: l10n.overdueCount(overdue),
+                detail: l10n.overdueDesc,
+                color: const Color(0xFFDC2626),
+                icon: Icons.crisis_alert_rounded,
+              ),
+              _SoftStatCard(
+                title: '전체 루틴',
+                value: l10n.totalPlantsMetric(total),
+                detail: '기록 중인 식물 수',
+                color: const Color(0xFF2F855A),
+                icon: Icons.local_florist_rounded,
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -1474,9 +1903,18 @@ class StatsTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l10n.statsCycleFlow, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                Text(
+                  l10n.statsCycleFlow,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text(l10n.statsCycleFlowHint, style: const TextStyle(color: Colors.black54)),
+                Text(
+                  l10n.statsCycleFlowHint,
+                  style: const TextStyle(color: Colors.black54),
+                ),
                 const SizedBox(height: 16),
                 ...plants.map((plant) {
                   final ratio = (plant.wateringCycleDays / 21).clamp(0.1, 1.0);
@@ -1487,14 +1925,28 @@ class StatsTab extends StatelessWidget {
                       children: [
                         Row(
                           children: [
-                            Expanded(child: Text(plant.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                            Expanded(
+                              child: Text(
+                                plant.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
-                                color: _statusColor(plant.status).withValues(alpha: 0.12),
+                                color: _statusColor(
+                                  plant.status,
+                                ).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: Text(l10n.cycleDaysLabel(plant.wateringCycleDays)),
+                              child: Text(
+                                l10n.cycleDaysLabel(plant.wateringCycleDays),
+                              ),
                             ),
                           ],
                         ),
@@ -1513,7 +1965,13 @@ class StatsTab extends StatelessWidget {
                   );
                 }),
                 const Divider(height: 28),
-                Text('평균 물주기 주기: ${l10n.averageCycle(avgCycle)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(
+                  '평균 물주기 주기: ${l10n.averageCycle(avgCycle)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1535,7 +1993,10 @@ class StatsTab extends StatelessWidget {
                       color: const Color(0xFFFFE7B3),
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const Icon(Icons.tips_and_updates_rounded, color: Color(0xFFC08400)),
+                    child: const Icon(
+                      Icons.tips_and_updates_rounded,
+                      color: Color(0xFFC08400),
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1543,7 +2004,10 @@ class StatsTab extends StatelessWidget {
                       overdue > 0
                           ? l10n.oldestOverdueHint
                           : l10n.stableFlowHint,
-                      style: const TextStyle(height: 1.5, color: Colors.black87),
+                      style: const TextStyle(
+                        height: 1.5,
+                        color: Colors.black87,
+                      ),
                     ),
                   ),
                 ],
@@ -1572,31 +2036,38 @@ class _GardenBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.fromLTRB(14, 8, 14, 12 + extraBottomPadding),
-      child: Container(
-        height: 92,
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 24,
-              offset: Offset(0, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            height: 92,
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 12),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Row(
-          children: List.generate(items.length, (index) {
-            final item = items[index];
-            return Expanded(
-              child: _GardenNavItem(
-                data: item,
-                isSelected: index == selectedIndex,
-                onTap: () => onSelected(index),
-              ),
-            );
-          }),
+            child: Row(
+              children: List.generate(items.length, (index) {
+                final item = items[index];
+                return Expanded(
+                  child: _GardenNavItem(
+                    data: item,
+                    isSelected: index == selectedIndex,
+                    onTap: () => onSelected(index),
+                  ),
+                );
+              }),
+            ),
+          ),
         ),
       ),
     );
@@ -1627,7 +2098,9 @@ class _GardenNavItem extends StatelessWidget {
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             decoration: BoxDecoration(
-              color: isSelected ? data.color.withValues(alpha: 0.16) : Colors.transparent,
+              color: isSelected
+                  ? data.color.withValues(alpha: 0.16)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(24),
             ),
             child: Center(
@@ -1644,7 +2117,9 @@ class _GardenNavItem extends StatelessWidget {
                     ),
                     child: Icon(
                       data.icon,
-                      color: isSelected ? Colors.white : const Color(0xFF5F6F65),
+                      color: isSelected
+                          ? Colors.white
+                          : const Color(0xFF5F6F65),
                       size: 20,
                     ),
                   ),
@@ -1709,7 +2184,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   void initState() {
     super.initState();
     final current = widget.existing;
-    _availablePresets = widget.presets.isNotEmpty ? List<PlantPreset>.from(widget.presets) : List<PlantPreset>.from(kPlantPresets);
+    _availablePresets = widget.presets.isNotEmpty
+        ? List<PlantPreset>.from(widget.presets)
+        : List<PlantPreset>.from(kPlantPresets);
     _selectedPreset = _availablePresets.firstWhere(
       (preset) => preset.type == current?.type,
       orElse: () {
@@ -1724,13 +2201,20 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
         return _availablePresets.first;
       },
     );
-    if (!_availablePresets.any((preset) => preset.type == _selectedPreset.type)) {
+    if (!_availablePresets.any(
+      (preset) => preset.type == _selectedPreset.type,
+    )) {
       _availablePresets = [_selectedPreset, ..._availablePresets];
     }
     _nameController = TextEditingController(text: current?.name ?? '');
     _locationController = TextEditingController(text: current?.location ?? '');
-    _memoController = TextEditingController(text: current?.memo ?? _selectedPreset.tip);
-    _cycleController = TextEditingController(text: '${current?.wateringCycleDays ?? _selectedPreset.defaultWateringCycleDays}');
+    _memoController = TextEditingController(
+      text: current?.memo ?? _selectedPreset.tip,
+    );
+    _cycleController = TextEditingController(
+      text:
+          '${current?.wateringCycleDays ?? _selectedPreset.defaultWateringCycleDays}',
+    );
     _presetSearchController = TextEditingController(text: _selectedPreset.type);
     _lastWateredAt = current?.lastWateredAt ?? DateTime.now();
     _photoAssetIds = List<String>.from(current?.photoAssetIds ?? const []);
@@ -1751,11 +2235,14 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     setState(() {
       _selectedPreset = preset;
       _presetSearchController.text = preset.type;
-      if (_nameController.text.trim().isEmpty || _nameController.text.trim() == widget.existing?.name) {
+      if (_nameController.text.trim().isEmpty ||
+          _nameController.text.trim() == widget.existing?.name) {
         _nameController.text = preset.type;
       }
       _cycleController.text = '${preset.defaultWateringCycleDays}';
-      if (_memoController.text.trim().isEmpty || _memoController.text.trim() == widget.existing?.memo || _memoController.text.trim() == previousTip) {
+      if (_memoController.text.trim().isEmpty ||
+          _memoController.text.trim() == widget.existing?.memo ||
+          _memoController.text.trim() == previousTip) {
         _memoController.text = preset.tip;
       }
     });
@@ -1848,12 +2335,18 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: const TextStyle(color: Colors.black54, height: 1.35),
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        height: 1.35,
+                      ),
                     ),
                   ],
                 ),
@@ -1912,7 +2405,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Icon(
-                                  isEditing ? Icons.edit_rounded : Icons.add_rounded,
+                                  isEditing
+                                      ? Icons.edit_rounded
+                                      : Icons.add_rounded,
                                   color: Colors.white,
                                   size: 26,
                                 ),
@@ -1923,15 +2418,23 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      isEditing ? l10n.plantInfoEdit : l10n.newPlantRegister,
-                                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                                      isEditing
+                                          ? l10n.plantInfoEdit
+                                          : l10n.newPlantRegister,
+                                      style: const TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       isEditing
                                           ? l10n.plantInfoEditHint
                                           : l10n.newPlantRegisterHint,
-                                      style: const TextStyle(color: Colors.black54, height: 1.4),
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        height: 1.4,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1945,7 +2448,10 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                             children: [
                               _InfoPill(
                                 icon: Icons.water_drop_rounded,
-                                label: l10n.cycleDaysLabel(int.tryParse(_cycleController.text.trim()) ?? _selectedPreset.defaultWateringCycleDays),
+                                label: l10n.cycleDaysLabel(
+                                  int.tryParse(_cycleController.text.trim()) ??
+                                      _selectedPreset.defaultWateringCycleDays,
+                                ),
                                 tint: const Color(0xFFE8F5EC),
                               ),
                               _InfoPill(
@@ -1955,7 +2461,11 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                               ),
                               _InfoPill(
                                 icon: Icons.photo_library_rounded,
-                                label: _photoAssetIds.isEmpty ? l10n.noPhoto : l10n.selectedPhotoCount(_photoAssetIds.length),
+                                label: _photoAssetIds.isEmpty
+                                    ? l10n.noPhoto
+                                    : l10n.selectedPhotoCount(
+                                        _photoAssetIds.length,
+                                      ),
                                 tint: const Color(0xFFEAF1FF),
                               ),
                             ],
@@ -1971,41 +2481,60 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                       child: Column(
                         children: [
                           Autocomplete<PlantPreset>(
-                            initialValue: TextEditingValue(text: _selectedPreset.type),
+                            initialValue: TextEditingValue(
+                              text: _selectedPreset.type,
+                            ),
                             displayStringForOption: (option) => option.type,
                             optionsBuilder: (textEditingValue) {
                               final query = textEditingValue.text.trim();
                               if (query.isEmpty) {
                                 return _availablePresets.take(8);
                               }
-                              return _availablePresets.where((preset) => preset.matchesQuery(query)).take(8);
+                              return _availablePresets
+                                  .where((preset) => preset.matchesQuery(query))
+                                  .take(8);
                             },
                             onSelected: _applyPreset,
-                            fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                              if (_presetSearchController.text != textEditingController.text) {
-                                textEditingController.text = _presetSearchController.text;
-                                textEditingController.selection = TextSelection.collapsed(offset: textEditingController.text.length);
-                              }
-                              return TextField(
-                                controller: textEditingController,
-                                focusNode: focusNode,
-                                decoration: _sheetInputDecoration(
-                                  label: l10n.searchPlantType,
-                                  icon: Icons.search_rounded,
-                                  hint: l10n.searchPlantTypeHint,
-                                ),
-                                onChanged: (value) {
-                                  final exact = _availablePresets.cast<PlantPreset?>().firstWhere(
-                                        (preset) => preset?.type == value.trim(),
-                                        orElse: () => null,
-                                      );
-                                  if (exact != null && exact.type != _selectedPreset.type) {
-                                    _applyPreset(exact);
+                            fieldViewBuilder:
+                                (
+                                  context,
+                                  textEditingController,
+                                  focusNode,
+                                  onFieldSubmitted,
+                                ) {
+                                  if (_presetSearchController.text !=
+                                      textEditingController.text) {
+                                    textEditingController.text =
+                                        _presetSearchController.text;
+                                    textEditingController
+                                        .selection = TextSelection.collapsed(
+                                      offset: textEditingController.text.length,
+                                    );
                                   }
+                                  return TextField(
+                                    controller: textEditingController,
+                                    focusNode: focusNode,
+                                    decoration: _sheetInputDecoration(
+                                      label: l10n.searchPlantType,
+                                      icon: Icons.search_rounded,
+                                      hint: l10n.searchPlantTypeHint,
+                                    ),
+                                    onChanged: (value) {
+                                      final exact = _availablePresets
+                                          .cast<PlantPreset?>()
+                                          .firstWhere(
+                                            (preset) =>
+                                                preset?.type == value.trim(),
+                                            orElse: () => null,
+                                          );
+                                      if (exact != null &&
+                                          exact.type != _selectedPreset.type) {
+                                        _applyPreset(exact);
+                                      }
+                                    },
+                                    onSubmitted: (_) => onFieldSubmitted(),
+                                  );
                                 },
-                                onSubmitted: (_) => onFieldSubmitted(),
-                              );
-                            },
                             optionsViewBuilder: (context, onSelected, options) {
                               final items = options.toList(growable: false);
                               return Align(
@@ -2013,8 +2542,11 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 child: Material(
                                   color: Colors.transparent,
                                   child: Container(
-                                    width: MediaQuery.of(context).size.width - 72,
-                                    constraints: const BoxConstraints(maxHeight: 280),
+                                    width:
+                                        MediaQuery.of(context).size.width - 72,
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 280,
+                                    ),
                                     margin: const EdgeInsets.only(top: 8),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
@@ -2031,13 +2563,18 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                       padding: const EdgeInsets.all(10),
                                       shrinkWrap: true,
                                       itemCount: items.length,
-                                      separatorBuilder: (context, index) => const SizedBox(height: 6),
+                                      separatorBuilder: (context, index) =>
+                                          const SizedBox(height: 6),
                                       itemBuilder: (context, index) {
                                         final preset = items[index];
                                         return InkWell(
                                           onTap: () => onSelected(preset),
-                                          borderRadius: BorderRadius.circular(18),
-                                          child: _PlantPresetOptionTile(preset: preset),
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                          child: _PlantPresetOptionTile(
+                                            preset: preset,
+                                          ),
                                         );
                                       },
                                     ),
@@ -2093,7 +2630,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 context: context,
                                 initialDate: _lastWateredAt,
                                 firstDate: DateTime(2024),
-                                lastDate: DateTime.now().add(const Duration(days: 365)),
+                                lastDate: DateTime.now().add(
+                                  const Duration(days: 365),
+                                ),
                               );
                               if (picked != null) {
                                 setState(() {
@@ -2107,7 +2646,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF8FBF8),
                                 borderRadius: BorderRadius.circular(22),
-                                border: Border.all(color: const Color(0xFFE3ECE6)),
+                                border: Border.all(
+                                  color: const Color(0xFFE3ECE6),
+                                ),
                               ),
                               child: Row(
                                 children: [
@@ -2118,26 +2659,40 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                       color: const Color(0xFFFFF1DF),
                                       borderRadius: BorderRadius.circular(14),
                                     ),
-                                    child: const Icon(Icons.calendar_today_rounded, color: Color(0xFFFFA94D), size: 20),
+                                    child: const Icon(
+                                      Icons.calendar_today_rounded,
+                                      color: Color(0xFFFFA94D),
+                                      size: 20,
+                                    ),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           l10n.lastWateredDate,
-                                          style: TextStyle(color: Color(0xFF66756C), fontWeight: FontWeight.w700),
+                                          style: TextStyle(
+                                            color: Color(0xFF66756C),
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
                                           _dateLabel(_lastWateredAt),
-                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  const Icon(Icons.chevron_right_rounded, color: Colors.black45),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Colors.black45,
+                                  ),
                                 ],
                               ),
                             ),
@@ -2178,10 +2733,17 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 backgroundColor: const Color(0xFFEAF1FF),
                                 foregroundColor: const Color(0xFF335EC7),
                                 elevation: 0,
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
                               ),
-                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              icon: const Icon(
+                                Icons.add_photo_alternate_outlined,
+                              ),
                               label: Text(l10n.selectPhoto),
                             ),
                           ),
@@ -2193,11 +2755,16 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFFF8FBF8),
                                 borderRadius: BorderRadius.circular(22),
-                                border: Border.all(color: const Color(0xFFE3ECE6)),
+                                border: Border.all(
+                                  color: const Color(0xFFE3ECE6),
+                                ),
                               ),
                               child: Text(
                                 l10n.noRegisteredPhotos,
-                                style: const TextStyle(color: Colors.black54, height: 1.4),
+                                style: const TextStyle(
+                                  color: Colors.black54,
+                                  height: 1.4,
+                                ),
                               ),
                             )
                           else
@@ -2212,7 +2779,10 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                   return Material(
                                     color: Colors.transparent,
                                     child: ScaleTransition(
-                                      scale: Tween<double>(begin: 1, end: 1.04).animate(animation),
+                                      scale: Tween<double>(
+                                        begin: 1,
+                                        end: 1.04,
+                                      ).animate(animation),
                                       child: child,
                                     ),
                                   );
@@ -2222,7 +2792,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                     if (newIndex > oldIndex) {
                                       newIndex -= 1;
                                     }
-                                    final moved = _photoAssetIds.removeAt(oldIndex);
+                                    final moved = _photoAssetIds.removeAt(
+                                      oldIndex,
+                                    );
                                     _photoAssetIds.insert(newIndex, moved);
                                   });
                                 },
@@ -2230,10 +2802,19 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                   final assetId = _photoAssetIds[index];
                                   return Padding(
                                     key: ValueKey(assetId),
-                                    padding: EdgeInsets.only(right: index == _photoAssetIds.length - 1 ? 0 : 12),
+                                    padding: EdgeInsets.only(
+                                      right: index == _photoAssetIds.length - 1
+                                          ? 0
+                                          : 12,
+                                    ),
                                     child: Stack(
                                       children: [
-                                        PlantPhotoThumb(assetId: assetId, width: 96, height: 96, borderRadius: 22),
+                                        PlantPhotoThumb(
+                                          assetId: assetId,
+                                          width: 96,
+                                          height: 96,
+                                          borderRadius: 22,
+                                        ),
                                         Positioned(
                                           left: 8,
                                           bottom: 8,
@@ -2241,10 +2822,17 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                             width: 28,
                                             height: 28,
                                             decoration: BoxDecoration(
-                                              color: Colors.black.withValues(alpha: 0.38),
-                                              borderRadius: BorderRadius.circular(999),
+                                              color: Colors.black.withValues(
+                                                alpha: 0.38,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
                                             ),
-                                            child: const Icon(Icons.drag_indicator_rounded, color: Colors.white, size: 18),
+                                            child: const Icon(
+                                              Icons.drag_indicator_rounded,
+                                              color: Colors.white,
+                                              size: 18,
+                                            ),
                                           ),
                                         ),
                                         if (index == 0)
@@ -2252,14 +2840,24 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                             left: 8,
                                             top: 8,
                                             child: Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withValues(alpha: 0.92),
-                                                borderRadius: BorderRadius.circular(999),
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.92,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
                                               ),
                                               child: Text(
                                                 l10n.representativePhoto,
-                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -2276,10 +2874,17 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                               width: 28,
                                               height: 28,
                                               decoration: BoxDecoration(
-                                                color: Colors.black.withValues(alpha: 0.68),
-                                                borderRadius: BorderRadius.circular(999),
+                                                color: Colors.black.withValues(
+                                                  alpha: 0.68,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
                                               ),
-                                              child: const Icon(Icons.close, color: Colors.white, size: 17),
+                                              child: const Icon(
+                                                Icons.close,
+                                                color: Colors.white,
+                                                size: 17,
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -2294,7 +2899,10 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                             _photoAssetIds.length > 1
                                 ? l10n.photoReorderHint
                                 : '${l10n.sunlight}: ${_selectedPreset.sunlight}',
-                            style: const TextStyle(color: Colors.black54, height: 1.4),
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              height: 1.4,
+                            ),
                           ),
                         ],
                       ),
@@ -2320,15 +2928,25 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                 ),
                 child: FilledButton(
                   onPressed: () {
-                    final cycle = int.tryParse(_cycleController.text.trim()) ?? _selectedPreset.defaultWateringCycleDays;
+                    final cycle =
+                        int.tryParse(_cycleController.text.trim()) ??
+                        _selectedPreset.defaultWateringCycleDays;
                     final plant = PlantItem(
-                      id: widget.existing?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-                      name: _nameController.text.trim().isEmpty ? _selectedPreset.type : _nameController.text.trim(),
+                      id:
+                          widget.existing?.id ??
+                          DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: _nameController.text.trim().isEmpty
+                          ? _selectedPreset.type
+                          : _nameController.text.trim(),
                       type: _selectedPreset.type,
-                      location: _locationController.text.trim().isEmpty ? l10n.noLocationEnteredFallback() : _locationController.text.trim(),
+                      location: _locationController.text.trim().isEmpty
+                          ? l10n.noLocationEnteredFallback()
+                          : _locationController.text.trim(),
                       wateringCycleDays: cycle,
                       lastWateredAt: _lastWateredAt,
-                      memo: _memoController.text.trim().isEmpty ? _selectedPreset.tip : _memoController.text.trim(),
+                      memo: _memoController.text.trim().isEmpty
+                          ? _selectedPreset.tip
+                          : _memoController.text.trim(),
                       sunlight: _selectedPreset.sunlight,
                       photoAssetIds: List<String>.from(_photoAssetIds),
                     );
@@ -2338,11 +2956,16 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                     backgroundColor: Colors.transparent,
                     shadowColor: Colors.transparent,
                     minimumSize: const Size.fromHeight(58),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
                   ),
                   child: Text(
                     isEditing ? l10n.saveChanges : l10n.registerPlant,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ),
@@ -2355,7 +2978,12 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
 }
 
 class PlantActionCard extends StatelessWidget {
-  const PlantActionCard({super.key, required this.plant, required this.onTap, required this.onMarkWatered});
+  const PlantActionCard({
+    super.key,
+    required this.plant,
+    required this.onTap,
+    required this.onMarkWatered,
+  });
 
   final PlantItem plant;
   final VoidCallback onTap;
@@ -2368,21 +2996,35 @@ class PlantActionCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               if (plant.photoAssetIds.isNotEmpty) ...[
-                PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 56, height: 56, borderRadius: 16),
+                PlantPhotoThumb(
+                  assetId: plant.photoAssetIds.first,
+                  width: 56,
+                  height: 56,
+                  borderRadius: 16,
+                ),
                 const SizedBox(width: 12),
               ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(plant.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      plant.name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text('${plant.type} · ${plant.location}'),
                   ],
@@ -2394,14 +3036,21 @@ class PlantActionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16)),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Row(
               children: [
                 Icon(Icons.water_drop_outlined, color: color),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    plant.status == PlantStatus.overdue ? l10n.overdueRecommendation(plant.daysUntilWatering.abs()) : l10n.todayWateringTurn,
+                    plant.status == PlantStatus.overdue
+                        ? l10n.overdueRecommendation(
+                            plant.daysUntilWatering.abs(),
+                          )
+                        : l10n.todayWateringTurn,
                   ),
                 ),
               ],
@@ -2410,9 +3059,19 @@ class PlantActionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(child: OutlinedButton(onPressed: onTap, child: Text(l10n.detailMemo))),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onTap,
+                  child: Text(l10n.detailMemo),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: FilledButton(onPressed: onMarkWatered, child: Text(l10n.markWatered))),
+              Expanded(
+                child: FilledButton(
+                  onPressed: onMarkWatered,
+                  child: Text(l10n.markWatered),
+                ),
+              ),
             ],
           ),
         ],
@@ -2458,7 +3117,11 @@ class _PlantPresetAvatar extends StatelessWidget {
         color: const Color(0xFFE8F5EC),
         borderRadius: BorderRadius.circular(radius),
       ),
-      child: const Icon(Icons.local_florist_rounded, color: Color(0xFF2F855A), size: 24),
+      child: const Icon(
+        Icons.local_florist_rounded,
+        color: Color(0xFF2F855A),
+        size: 24,
+      ),
     );
   }
 }
@@ -2540,7 +3203,10 @@ class _SelectedPlantPresetCard extends StatelessWidget {
               children: [
                 Text(
                   preset.type,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -2578,22 +3244,38 @@ class CompactPlantCard extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+        ),
         child: Row(
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: _statusColor(plant.status).withValues(alpha: 0.15),
-              child: Icon(Icons.local_florist, color: _statusColor(plant.status)),
+              backgroundColor: _statusColor(
+                plant.status,
+              ).withValues(alpha: 0.15),
+              child: Icon(
+                Icons.local_florist,
+                color: _statusColor(plant.status),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(plant.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    plant.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 4),
-                  Text(l10n.afterDaysLabel(plant.daysUntilWatering, plant.location)),
+                  Text(
+                    l10n.afterDaysLabel(
+                      plant.daysUntilWatering,
+                      plant.location,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2611,11 +3293,13 @@ class PlantListCard extends StatelessWidget {
     required this.plant,
     required this.onTap,
     this.presetImageUrl,
+    this.priorityRank,
   });
 
   final PlantItem plant;
   final VoidCallback onTap;
   final String? presetImageUrl;
+  final int? priorityRank;
 
   @override
   Widget build(BuildContext context) {
@@ -2628,10 +3312,18 @@ class PlantListCard extends StatelessWidget {
       PlantStatus.healthy => const Color(0x11000000),
     };
     final statusBanner = switch (plant.status) {
-      PlantStatus.overdue => const LinearGradient(colors: [Color(0xFFFFE2E0), Color(0xFFFFF5F4)]),
-      PlantStatus.today => const LinearGradient(colors: [Color(0xFFFFF0D7), Color(0xFFFFF8EC)]),
-      PlantStatus.soon => const LinearGradient(colors: [Color(0xFFEAF3FF), Color(0xFFF6FAFF)]),
-      PlantStatus.healthy => const LinearGradient(colors: [Color(0xFFEAF6EE), Color(0xFFF6FBF8)]),
+      PlantStatus.overdue => const LinearGradient(
+        colors: [Color(0xFFFFE2E0), Color(0xFFFFF5F4)],
+      ),
+      PlantStatus.today => const LinearGradient(
+        colors: [Color(0xFFFFF0D7), Color(0xFFFFF8EC)],
+      ),
+      PlantStatus.soon => const LinearGradient(
+        colors: [Color(0xFFEAF3FF), Color(0xFFF6FAFF)],
+      ),
+      PlantStatus.healthy => const LinearGradient(
+        colors: [Color(0xFFEAF6EE), Color(0xFFF6FBF8)],
+      ),
     };
     return InkWell(
       onTap: onTap,
@@ -2642,7 +3334,13 @@ class PlantListCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(color: color.withValues(alpha: 0.18)),
-          boxShadow: [BoxShadow(color: statusGlow, blurRadius: 20, offset: const Offset(0, 10))],
+          boxShadow: [
+            BoxShadow(
+              color: statusGlow,
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
         ),
         child: Column(
           children: [
@@ -2655,7 +3353,10 @@ class PlantListCard extends StatelessWidget {
                   Container(
                     width: 8,
                     height: 8,
-                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -2663,9 +3364,33 @@ class PlantListCard extends StatelessWidget {
                       _statusDescription(plant.status),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
+                  if (priorityRank != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '#$priorityRank',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   StatusChip(status: plant.status),
                 ],
               ),
@@ -2680,27 +3405,45 @@ class PlantListCard extends StatelessWidget {
                       fit: StackFit.expand,
                       children: [
                         if (plant.photoAssetIds.isNotEmpty)
-                          PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 126, height: 220, borderRadius: 0)
-                        else if (presetImageUrl != null && presetImageUrl!.isNotEmpty)
+                          PlantPhotoThumb(
+                            assetId: plant.photoAssetIds.first,
+                            width: 126,
+                            height: 220,
+                            borderRadius: 0,
+                          )
+                        else if (presetImageUrl != null &&
+                            presetImageUrl!.isNotEmpty)
                           Image.network(
                             presetImageUrl!,
                             fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => Container(
-                              color: color.withValues(alpha: 0.14),
-                              child: Icon(Icons.local_florist_rounded, color: color, size: 42),
-                            ),
+                            errorBuilder: (context, error, stackTrace) =>
+                                Container(
+                                  color: color.withValues(alpha: 0.14),
+                                  child: Icon(
+                                    Icons.local_florist_rounded,
+                                    color: color,
+                                    size: 42,
+                                  ),
+                                ),
                           )
                         else
                           Container(
                             color: color.withValues(alpha: 0.14),
-                            child: Icon(Icons.local_florist_rounded, color: color, size: 42),
+                            child: Icon(
+                              Icons.local_florist_rounded,
+                              color: color,
+                              size: 42,
+                            ),
                           ),
                         DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black.withValues(alpha: 0.22)],
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.22),
+                              ],
                             ),
                           ),
                         ),
@@ -2709,14 +3452,21 @@ class PlantListCard extends StatelessWidget {
                             top: 10,
                             right: 10,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.42),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
                                 '+${plant.photoAssetIds.length - 1}',
-                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ),
@@ -2734,7 +3484,10 @@ class PlantListCard extends StatelessWidget {
                             plant.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -2755,7 +3508,9 @@ class PlantListCard extends StatelessWidget {
                               ),
                               _InfoPill(
                                 icon: Icons.water_drop_rounded,
-                                label: l10n.cycleDaysLabel(plant.wateringCycleDays),
+                                label: l10n.cycleDaysLabel(
+                                  plant.wateringCycleDays,
+                                ),
                                 tint: const Color(0xFFFFF0D9),
                               ),
                             ],
@@ -2765,7 +3520,10 @@ class PlantListCard extends StatelessWidget {
                             plant.memo,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.black54, height: 1.45),
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              height: 1.45,
+                            ),
                           ),
                         ],
                       ),
@@ -2791,8 +3549,18 @@ class StatusChip extends StatelessWidget {
     final color = _statusColor(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
-      child: Text(_statusText(status), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _statusText(status),
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+        ),
+      ),
     );
   }
 }
@@ -2836,7 +3604,12 @@ class _InfoPill extends StatelessWidget {
 }
 
 class StatCard extends StatelessWidget {
-  const StatCard({super.key, required this.title, required this.value, required this.color});
+  const StatCard({
+    super.key,
+    required this.title,
+    required this.value,
+    required this.color,
+  });
 
   final String title;
   final String value;
@@ -2847,13 +3620,23 @@ class StatCard extends StatelessWidget {
     return Container(
       width: 160,
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: const TextStyle(color: Colors.black54)),
           const SizedBox(height: 10),
-          Text(value, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -2861,10 +3644,7 @@ class StatCard extends StatelessWidget {
 }
 
 class _HomeMiniStat extends StatelessWidget {
-  const _HomeMiniStat({
-    required this.label,
-    required this.value,
-  });
+  const _HomeMiniStat({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -2881,9 +3661,23 @@ class _HomeMiniStat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Color(0xFF66756C), fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF66756C),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(value, style: const TextStyle(color: Color(0xFF111A16), fontSize: 22, fontWeight: FontWeight.w800)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111A16),
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ],
       ),
     );
@@ -2929,11 +3723,26 @@ class _HomeOverviewCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(color: Color(0xFF66756C), fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF66756C),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text(subtitle, style: const TextStyle(color: Colors.black54, height: 1.4)),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Colors.black54, height: 1.4),
+                ),
               ],
             ),
           ),
@@ -2975,7 +3784,11 @@ class _DarkMetricTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -3019,12 +3832,28 @@ class _SoftStatCard extends StatelessWidget {
             ),
             child: Icon(icon, color: color, size: 20),
           ),
-          const Spacer(),
-          Text(title, style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 18),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black54,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(detail, style: const TextStyle(color: Colors.black54, height: 1.35)),
+          Text(
+            detail,
+            style: const TextStyle(color: Colors.black54, height: 1.35),
+          ),
         ],
       ),
     );
@@ -3041,14 +3870,22 @@ class EmptyCard extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Text(message, style: const TextStyle(color: Colors.black54)),
     );
   }
 }
 
 class SettingsTile extends StatelessWidget {
-  const SettingsTile({super.key, required this.icon, required this.title, required this.subtitle});
+  const SettingsTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   final IconData icon;
   final String title;
@@ -3059,7 +3896,10 @@ class SettingsTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+      ),
       child: Row(
         children: [
           CircleAvatar(
@@ -3072,7 +3912,10 @@ class SettingsTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 4),
                 Text(subtitle, style: const TextStyle(color: Colors.black54)),
               ],
@@ -3095,12 +3938,1287 @@ class _SectionTitle extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 4),
         Text(subtitle, style: const TextStyle(color: Colors.black54)),
       ],
     );
   }
+}
+
+class HomeDashboardTab extends StatelessWidget {
+  const HomeDashboardTab({
+    super.key,
+    required this.plants,
+    required this.pinnedPlantId,
+    required this.onTapPlant,
+    required this.onMarkWatered,
+    required this.onMarkAllWatered,
+  });
+
+  final List<PlantItem> plants;
+  final String? pinnedPlantId;
+  final ValueChanged<PlantItem> onTapPlant;
+  final ValueChanged<PlantItem> onMarkWatered;
+  final ValueChanged<List<PlantItem>> onMarkAllWatered;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final sortedPlants = _sortPlantsByUrgency(plants);
+    final urgentTasks = sortedPlants
+        .where(
+          (plant) =>
+              plant.status == PlantStatus.overdue ||
+              plant.status == PlantStatus.today,
+        )
+        .toList();
+    final soonTasks = sortedPlants
+        .where((plant) => plant.status == PlantStatus.soon)
+        .toList();
+    final primaryPlant = sortedPlants.cast<PlantItem?>().firstWhere(
+      (plant) => plant?.id == pinnedPlantId,
+      orElse: () => sortedPlants.isNotEmpty ? sortedPlants.first : null,
+    );
+    final healthyCount = plants
+        .where((plant) => plant.status == PlantStatus.healthy)
+        .length;
+    final focusTasks = urgentTasks.isNotEmpty
+        ? urgentTasks
+        : soonTasks.take(3).toList();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
+      children: [
+        if (primaryPlant == null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: EmptyCard(message: l10n.noPlantsYet),
+          )
+        else
+          _HomeImmersiveSection(
+            plant: primaryPlant,
+            healthyCount: healthyCount,
+            totalCount: plants.length,
+            assignmentPanel: _HomeAssignmentPanel(
+              tasks: focusTasks,
+              hasUrgentTasks: urgentTasks.isNotEmpty,
+              onTapPlant: onTapPlant,
+              onMarkWatered: onMarkWatered,
+              onMarkAllWatered: () => onMarkAllWatered(urgentTasks),
+            ),
+            bottomPanel: soonTasks.isNotEmpty
+                ? _HomeSoonPanel(plants: soonTasks, onTapPlant: onTapPlant)
+                : _HomeCalmPanel(healthyCount: healthyCount),
+          ),
+      ],
+    );
+  }
+}
+
+// ignore: unused_element
+class _HomeFocusPlantCard extends StatelessWidget {
+  const _HomeFocusPlantCard({
+    required this.plant,
+    required this.healthyCount,
+    required this.totalCount,
+  });
+
+  final PlantItem plant;
+  final int healthyCount;
+  final int totalCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final locationLabel = plant.location.trim().isEmpty
+        ? l10n.locationUnset
+        : plant.location.trim();
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xFF163627),
+        borderRadius: BorderRadius.circular(32),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 214,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (plant.photoAssetIds.isNotEmpty)
+                  PlantPhotoThumb(
+                    assetId: plant.photoAssetIds.first,
+                    width: double.infinity,
+                    height: 214,
+                    borderRadius: 0,
+                  )
+                else
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFFCBD9C7), Color(0xFF6F8D6D)],
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.local_florist_rounded,
+                      size: 72,
+                      color: Colors.white70,
+                    ),
+                  ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.04),
+                        Colors.black.withValues(alpha: 0.32),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: Row(
+                    children: [
+                      _HeroChip(
+                        icon: Icons.place_rounded,
+                        label: locationLabel,
+                      ),
+                      const SizedBox(width: 8),
+                      _HeroChip(
+                        icon: Icons.eco_rounded,
+                        label: _statusText(plant.status),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  plant.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  plant.type,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _HomeRoundMetric(
+                        icon: Icons.timeline_rounded,
+                        iconColor: const Color(0xFF2E4C6D),
+                        ringColor: const Color(0xFFBFD1EA),
+                        title: '정리된 식물',
+                        value: '$healthyCount / $totalCount',
+                        subtitle: '지금 안정 상태',
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: _HomeRoundMetric(
+                        icon: Icons.south_rounded,
+                        iconColor: const Color(0xFFC7971E),
+                        ringColor: const Color(0xFFF1DEAE),
+                        title: '다음 물 주기',
+                        value: plant.daysUntilWatering <= 0
+                            ? '오늘'
+                            : '${plant.daysUntilWatering}일 이내',
+                        subtitle: _dateLabel(plant.nextWateringAt),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroChip extends StatelessWidget {
+  const _HeroChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE6E7CF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: const Color(0xFF46543A)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF46543A),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeImmersiveSection extends StatelessWidget {
+  const _HomeImmersiveSection({
+    required this.plant,
+    required this.healthyCount,
+    required this.totalCount,
+    required this.assignmentPanel,
+    required this.bottomPanel,
+  });
+
+  final PlantItem plant;
+  final int healthyCount;
+  final int totalCount;
+  final Widget assignmentPanel;
+  final Widget bottomPanel;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final locationLabel = plant.location.trim().isEmpty
+        ? l10n.locationUnset
+        : plant.location.trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 260,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (plant.photoAssetIds.isNotEmpty)
+                PlantPhotoThumb(
+                  assetId: plant.photoAssetIds.first,
+                  width: double.infinity,
+                  height: 260,
+                  borderRadius: 0,
+                )
+              else
+                Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFFD7E2D2), Color(0xFF87A184)],
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.local_florist_rounded,
+                    size: 72,
+                    color: Colors.white70,
+                  ),
+                ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.04),
+                      Colors.black.withValues(alpha: 0.18),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 42,
+                left: 18,
+                right: 18,
+                child: Align(
+                  alignment: Alignment.bottomRight,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _HeroChip(
+                        icon: Icons.place_rounded,
+                        label: locationLabel,
+                      ),
+                      _HeroChip(
+                        icon: Icons.eco_rounded,
+                        label: _statusText(plant.status),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Transform.translate(
+          offset: const Offset(0, -24),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFF7F8F3),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    plant.name,
+                    style: const TextStyle(
+                      color: Color(0xFF23472D),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    plant.type,
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _HomeRoundMetric(
+                          icon: Icons.timeline_rounded,
+                          iconColor: const Color(0xFF2E4C6D),
+                          ringColor: const Color(0xFFBFD1EA),
+                          title: '정리된 식물',
+                          value: '$healthyCount / $totalCount',
+                          subtitle: '지금 안정 상태',
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: _HomeRoundMetric(
+                          icon: Icons.south_rounded,
+                          iconColor: const Color(0xFFC7971E),
+                          ringColor: const Color(0xFFF1DEAE),
+                          title: '다음 물 주기',
+                          value: plant.daysUntilWatering <= 0
+                              ? '오늘'
+                              : '${plant.daysUntilWatering}일 이내',
+                          subtitle: _dateLabel(plant.nextWateringAt),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  assignmentPanel,
+                  const SizedBox(height: 18),
+                  bottomPanel,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HomeRoundMetric extends StatelessWidget {
+  const _HomeRoundMetric({
+    required this.icon,
+    required this.iconColor,
+    required this.ringColor,
+    required this.title,
+    required this.value,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final Color ringColor;
+  final String title;
+  final String value;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 78,
+            height: 78,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: ringColor, width: 5),
+            ),
+            child: Icon(icon, color: iconColor, size: 34),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Color(0xFF3B4A40),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF111A16),
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.black54, height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeAssignmentPanel extends StatelessWidget {
+  const _HomeAssignmentPanel({
+    required this.tasks,
+    required this.hasUrgentTasks,
+    required this.onTapPlant,
+    required this.onMarkWatered,
+    required this.onMarkAllWatered,
+  });
+
+  final List<PlantItem> tasks;
+  final bool hasUrgentTasks;
+  final ValueChanged<PlantItem> onTapPlant;
+  final ValueChanged<PlantItem> onMarkWatered;
+  final VoidCallback onMarkAllWatered;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '오늘',
+            style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasUrgentTasks
+                ? '지금 처리해야 하는 식물 과제를 먼저 보여드릴게요.'
+                : '오늘 급한 과제는 없지만 곧 체크할 식물을 정리해두었어요.',
+            style: const TextStyle(color: Colors.black54, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          if (tasks.isEmpty)
+            const EmptyCard(message: '오늘 표시할 과제가 없어요.')
+          else
+            ..._withGaps(
+              tasks.map((plant) {
+                return _HomeAssignmentTile(
+                  plant: plant,
+                  onTap: () => onTapPlant(plant),
+                  onComplete: plant.status == PlantStatus.soon
+                      ? () => onTapPlant(plant)
+                      : () => onMarkWatered(plant),
+                );
+              }).toList(),
+              gap: 10,
+            ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: hasUrgentTasks ? onMarkAllWatered : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF234F29),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFFD8E2DA),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text(
+                '모든 과제 처리',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeAssignmentTile extends StatelessWidget {
+  const _HomeAssignmentTile({
+    required this.plant,
+    required this.onTap,
+    required this.onComplete,
+  });
+
+  final PlantItem plant;
+  final VoidCallback onTap;
+  final VoidCallback onComplete;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor(plant.status);
+    final title = plant.status == PlantStatus.soon ? '상태 확인' : '물 주기';
+    final subtitle = plant.status == PlantStatus.overdue
+        ? '${plant.daysUntilWatering.abs()}일 지남'
+        : plant.status == PlantStatus.today
+        ? '오늘 해야 해요'
+        : '곧 체크 권장';
+    final icon = switch (plant.status) {
+      PlantStatus.overdue => Icons.health_and_safety_rounded,
+      PlantStatus.today => Icons.water_drop_rounded,
+      PlantStatus.soon => Icons.spa_outlined,
+      PlantStatus.healthy => Icons.eco_rounded,
+    };
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAF7),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF33433A),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${plant.name} · $subtitle',
+                    style: const TextStyle(color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.notifications_none_rounded,
+              color: color.withValues(alpha: 0.7),
+            ),
+            const SizedBox(width: 12),
+            InkWell(
+              onTap: onComplete,
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withValues(alpha: 0.7)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeSoonPanel extends StatelessWidget {
+  const _HomeSoonPanel({required this.plants, required this.onTapPlant});
+
+  final List<PlantItem> plants;
+  final ValueChanged<PlantItem> onTapPlant;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '곧 할 일',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '하루 이틀 안에 체크하면 좋은 식물만 모아두었어요.',
+            style: TextStyle(color: Colors.black54, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          ..._withGaps(
+            plants.take(3).map((plant) {
+              return CompactPlantCard(
+                plant: plant,
+                onTap: () => onTapPlant(plant),
+              );
+            }).toList(),
+            gap: 0,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeCalmPanel extends StatelessWidget {
+  const _HomeCalmPanel({required this.healthyCount});
+
+  final int healthyCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF3EB),
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '루틴이 안정적이에요',
+            style: TextStyle(
+              color: Color(0xFF234F29),
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '현재 $healthyCount개의 식물이 안정 상태예요. 오늘은 가볍게 둘러보면 됩니다.',
+            style: const TextStyle(color: Color(0xFF4C6351), height: 1.45),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _MyPlantsBrowseMode { location, plant, photo }
+
+class OrganizedMyPlantsTab extends StatefulWidget {
+  const OrganizedMyPlantsTab({
+    super.key,
+    required this.plants,
+    required this.presets,
+    required this.onTapPlant,
+    required this.onEditPlant,
+    required this.pinnedPlantId,
+    required this.onTogglePinnedPlant,
+    required this.onAddPlant,
+  });
+
+  final List<PlantItem> plants;
+  final List<PlantPreset> presets;
+  final ValueChanged<PlantItem> onTapPlant;
+  final ValueChanged<PlantItem> onEditPlant;
+  final String? pinnedPlantId;
+  final ValueChanged<PlantItem> onTogglePinnedPlant;
+  final VoidCallback onAddPlant;
+
+  @override
+  State<OrganizedMyPlantsTab> createState() => _OrganizedMyPlantsTabState();
+}
+
+class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
+  _MyPlantsBrowseMode _browseMode = _MyPlantsBrowseMode.location;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final sortedPlants = _sortPlantsByUrgency(widget.plants);
+    final presetImageByType = {
+      for (final preset in widget.presets)
+        if ((preset.imageUrl ?? '').isNotEmpty) preset.type: preset.imageUrl!,
+    };
+    final locationGroups = _groupPlantEntries(
+      sortedPlants,
+      (plant) => plant.location.trim().isEmpty
+          ? l10n.locationUnset
+          : plant.location.trim(),
+    );
+    final typeGroups = _groupPlantEntries(
+      sortedPlants,
+      (plant) => plant.type.trim().isEmpty ? l10n.plantType : plant.type.trim(),
+    );
+    final photoEntries = _collectPlantPhotoEntries(sortedPlants);
+
+    final content = switch (_browseMode) {
+      _MyPlantsBrowseMode.location => [
+        for (final entry in locationGroups)
+          _PlantGroupCard(
+            title: entry.key,
+            subtitle: '${entry.value.length} 식물',
+            plants: entry.value,
+            presetImageByType: presetImageByType,
+            pinnedPlantId: widget.pinnedPlantId,
+            onTapPlant: widget.onTapPlant,
+            onEditPlant: widget.onEditPlant,
+            onTogglePinnedPlant: widget.onTogglePinnedPlant,
+          ),
+      ],
+      _MyPlantsBrowseMode.plant => [
+        for (final entry in typeGroups)
+          _PlantGroupCard(
+            title: entry.key,
+            subtitle: '${entry.value.length} 등록됨',
+            plants: entry.value,
+            presetImageByType: presetImageByType,
+            pinnedPlantId: widget.pinnedPlantId,
+            onTapPlant: widget.onTapPlant,
+            onEditPlant: widget.onEditPlant,
+            onTogglePinnedPlant: widget.onTogglePinnedPlant,
+          ),
+      ],
+      _MyPlantsBrowseMode.photo => [
+        if (photoEntries.isEmpty)
+          EmptyCard(message: l10n.noPhotosToShow)
+        else
+          for (final entry in photoEntries)
+            _PlantPhotoFeedCard(
+              entry: entry,
+              isPinned: widget.pinnedPlantId == entry.plant.id,
+              onTap: () => widget.onTapPlant(entry.plant),
+              onEdit: () => widget.onEditPlant(entry.plant),
+              onTogglePinned: () => widget.onTogglePinnedPlant(entry.plant),
+            ),
+      ],
+    };
+
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
+        children: [
+          _MyPlantsBrowseHeader(
+            selectedMode: _browseMode,
+            plantCount: widget.plants.length,
+            onModeSelected: (_MyPlantsBrowseMode mode) {
+              setState(() {
+                _browseMode = mode;
+              });
+            },
+          ),
+          const SizedBox(height: 18),
+          ..._withGaps(content, gap: 16),
+        ],
+      ),
+    );
+  }
+}
+
+class _MyPlantsBrowseHeader extends StatelessWidget {
+  const _MyPlantsBrowseHeader({
+    required this.selectedMode,
+    required this.plantCount,
+    required this.onModeSelected,
+  });
+
+  final _MyPlantsBrowseMode selectedMode;
+  final int plantCount;
+  final ValueChanged<_MyPlantsBrowseMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final tabs = <(_MyPlantsBrowseMode, String)>[
+      (_MyPlantsBrowseMode.location, context.l10n.location),
+      (_MyPlantsBrowseMode.plant, '식물'),
+      (_MyPlantsBrowseMode.photo, '사진'),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F0E2),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$plantCount plants',
+                style: const TextStyle(
+                  color: Color(0xFF6A8262),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE7EDD7),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (mode, label) in tabs)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: _BrowseTabChip(
+                    label: label,
+                    isSelected: selectedMode == mode,
+                    onTap: () => onModeSelected(mode),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BrowseTabChip extends StatelessWidget {
+  const _BrowseTabChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF2E5B2E) : Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : const Color(0xFF8A9A76),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlantGroupCard extends StatelessWidget {
+  const _PlantGroupCard({
+    required this.title,
+    required this.subtitle,
+    required this.plants,
+    required this.presetImageByType,
+    required this.pinnedPlantId,
+    required this.onTapPlant,
+    required this.onEditPlant,
+    required this.onTogglePinnedPlant,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<PlantItem> plants;
+  final Map<String, String> presetImageByType;
+  final String? pinnedPlantId;
+  final ValueChanged<PlantItem> onTapPlant;
+  final ValueChanged<PlantItem> onEditPlant;
+  final ValueChanged<PlantItem> onTogglePinnedPlant;
+
+  @override
+  Widget build(BuildContext context) {
+    final urgentCount = plants
+        .where((plant) => plant.status != PlantStatus.healthy)
+        .length;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _GroupPhotoStrip(
+            plants: plants,
+            presetImageByType: presetImageByType,
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+              if (urgentCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFE7E2),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '체크 $urgentCount개',
+                    style: const TextStyle(
+                      color: Color(0xFFD95C45),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ..._withGaps(
+            plants.take(5).map((plant) {
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: _statusColor(plant.status).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => onTogglePinnedPlant(plant),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        pinnedPlantId == plant.id
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        size: 20,
+                        color: pinnedPlantId == plant.id
+                            ? const Color(0xFFD95C45)
+                            : const Color(0xFF8DA08E),
+                      ),
+                      tooltip: '홈에 표시',
+                    ),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => onTapPlant(plant),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text(
+                            plant.name,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => onEditPlant(plant),
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.edit_rounded, size: 18),
+                      tooltip: '수정',
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+            gap: 8,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupPhotoStrip extends StatelessWidget {
+  const _GroupPhotoStrip({
+    required this.plants,
+    required this.presetImageByType,
+  });
+
+  final List<PlantItem> plants;
+  final Map<String, String> presetImageByType;
+
+  @override
+  Widget build(BuildContext context) {
+    final photoEntries = <_PlantPhotoEntry>[
+      for (final plant in plants)
+        for (final assetId in plant.photoAssetIds)
+          _PlantPhotoEntry(plant: plant, assetId: assetId),
+    ];
+    final previewEntries = photoEntries.take(4).toList();
+    final fallbackPlants = plants.take(4).toList();
+
+    return SizedBox(
+      height: 152,
+      child: Row(
+        children: [
+          for (
+            var i = 0;
+            i <
+                (previewEntries.isNotEmpty
+                    ? previewEntries.length
+                    : fallbackPlants.length);
+            i++
+          ) ...[
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: previewEntries.isNotEmpty
+                    ? PlantPhotoThumb(
+                        assetId: previewEntries[i].assetId,
+                        width: double.infinity,
+                        height: 152,
+                        borderRadius: 0,
+                      )
+                    : ((presetImageByType[fallbackPlants[i].type] ?? '')
+                              .isNotEmpty
+                          ? Image.network(
+                              presetImageByType[fallbackPlants[i].type]!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Container(
+                                    color: _statusColor(
+                                      fallbackPlants[i].status,
+                                    ).withValues(alpha: 0.18),
+                                    child: Icon(
+                                      Icons.local_florist_rounded,
+                                      color: _statusColor(
+                                        fallbackPlants[i].status,
+                                      ),
+                                      size: 36,
+                                    ),
+                                  ),
+                            )
+                          : Container(
+                              color: _statusColor(
+                                fallbackPlants[i].status,
+                              ).withValues(alpha: 0.18),
+                              child: Icon(
+                                Icons.local_florist_rounded,
+                                color: _statusColor(fallbackPlants[i].status),
+                                size: 36,
+                              ),
+                            )),
+              ),
+            ),
+            if (i !=
+                (previewEntries.isNotEmpty
+                        ? previewEntries.length
+                        : fallbackPlants.length) -
+                    1)
+              const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PlantPhotoFeedCard extends StatelessWidget {
+  const _PlantPhotoFeedCard({
+    required this.entry,
+    required this.isPinned,
+    required this.onTap,
+    required this.onEdit,
+    required this.onTogglePinned,
+  });
+
+  final _PlantPhotoEntry entry;
+  final bool isPinned;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onTogglePinned;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final location = entry.plant.location.trim().isEmpty
+        ? l10n.locationUnset
+        : entry.plant.location.trim();
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          children: [
+            PlantPhotoThumb(
+              assetId: entry.assetId,
+              width: 112,
+              height: 112,
+              borderRadius: 18,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.plant.name,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${entry.plant.type} · $location',
+                    style: const TextStyle(color: Colors.black54),
+                  ),
+                  const SizedBox(height: 10),
+                  StatusChip(status: entry.plant.status),
+                  const SizedBox(height: 10),
+                  Text(
+                    _dateLabel(entry.plant.nextWateringAt),
+                    style: const TextStyle(
+                      color: Color(0xFF56705B),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: onTogglePinned,
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    isPinned
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: isPinned
+                        ? const Color(0xFFD95C45)
+                        : const Color(0xFF8DA08E),
+                  ),
+                  tooltip: '홈에 표시',
+                ),
+                IconButton(
+                  onPressed: onEdit,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.edit_rounded),
+                  tooltip: '수정',
+                ),
+                const Icon(Icons.chevron_right_rounded),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlantPhotoEntry {
+  const _PlantPhotoEntry({required this.plant, required this.assetId});
+
+  final PlantItem plant;
+  final String assetId;
 }
 
 Color _statusColor(PlantStatus status) {
@@ -3117,7 +5235,9 @@ Color _statusColor(PlantStatus status) {
 }
 
 String _statusText(PlantStatus status) {
-  final l10n = AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale);
+  final l10n = AppLocalizations.forLocale(
+    WidgetsBinding.instance.platformDispatcher.locale,
+  );
   switch (status) {
     case PlantStatus.healthy:
       return l10n.healthy;
@@ -3131,7 +5251,9 @@ String _statusText(PlantStatus status) {
 }
 
 String _statusDescription(PlantStatus status) {
-  final l10n = AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale);
+  final l10n = AppLocalizations.forLocale(
+    WidgetsBinding.instance.platformDispatcher.locale,
+  );
   switch (status) {
     case PlantStatus.healthy:
       return l10n.healthyDesc;
@@ -3145,5 +5267,77 @@ String _statusDescription(PlantStatus status) {
 }
 
 String _dateLabel(DateTime date) {
-  return AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale).dateLabel(date);
+  return AppLocalizations.forLocale(
+    WidgetsBinding.instance.platformDispatcher.locale,
+  ).dateLabel(date);
+}
+
+List<PlantItem> _sortPlantsByUrgency(List<PlantItem> plants) {
+  final sorted = List<PlantItem>.from(plants);
+  sorted.sort((a, b) {
+    final priorityCompare = _plantPriorityScore(
+      a,
+    ).compareTo(_plantPriorityScore(b));
+    if (priorityCompare != 0) return priorityCompare;
+
+    final dayCompare = a.daysUntilWatering.compareTo(b.daysUntilWatering);
+    if (dayCompare != 0) return dayCompare;
+
+    final cycleCompare = a.wateringCycleDays.compareTo(b.wateringCycleDays);
+    if (cycleCompare != 0) return cycleCompare;
+
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  });
+  return sorted;
+}
+
+List<MapEntry<String, List<PlantItem>>> _groupPlantEntries(
+  List<PlantItem> plants,
+  String Function(PlantItem plant) keyBuilder,
+) {
+  final grouped = <String, List<PlantItem>>{};
+  for (final plant in plants) {
+    final key = keyBuilder(plant);
+    grouped.putIfAbsent(key, () => <PlantItem>[]).add(plant);
+  }
+  final entries = grouped.entries.toList();
+  entries.sort((a, b) {
+    final priorityCompare = _plantPriorityScore(
+      a.value.first,
+    ).compareTo(_plantPriorityScore(b.value.first));
+    if (priorityCompare != 0) return priorityCompare;
+    return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+  });
+  return entries;
+}
+
+List<_PlantPhotoEntry> _collectPlantPhotoEntries(List<PlantItem> plants) {
+  final entries = <_PlantPhotoEntry>[];
+  for (final plant in plants) {
+    for (final assetId in plant.photoAssetIds) {
+      entries.add(_PlantPhotoEntry(plant: plant, assetId: assetId));
+    }
+  }
+  return entries;
+}
+
+List<Widget> _withGaps(List<Widget> widgets, {double gap = 12}) {
+  if (widgets.isEmpty) return widgets;
+  final spaced = <Widget>[];
+  for (var i = 0; i < widgets.length; i++) {
+    if (i > 0) {
+      spaced.add(SizedBox(height: gap));
+    }
+    spaced.add(widgets[i]);
+  }
+  return spaced;
+}
+
+int _plantPriorityScore(PlantItem plant) {
+  return switch (plant.status) {
+    PlantStatus.overdue => 0,
+    PlantStatus.today => 1,
+    PlantStatus.soon => 2,
+    PlantStatus.healthy => 3,
+  };
 }

@@ -59,7 +59,14 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
         _error = null;
       });
 
-      final permission = await PhotoManager.requestPermissionExtend();
+      final permission = await PhotoManager.requestPermissionExtend(
+        requestOption: const PermissionRequestOption(
+          androidPermission: AndroidPermission(
+            type: RequestType.image,
+            mediaLocation: false,
+          ),
+        ),
+      );
       if (!mounted) return;
 
       _permissionState = permission;
@@ -75,7 +82,9 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
         type: RequestType.image,
         onlyAll: false,
         filterOption: FilterOptionGroup(
-          imageOption: const FilterOption(sizeConstraint: SizeConstraint(ignoreSize: true)),
+          imageOption: const FilterOption(
+            sizeConstraint: SizeConstraint(ignoreSize: true),
+          ),
         ),
       );
 
@@ -182,7 +191,10 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
   }
 
   void _handleScroll() {
-    if (!_scrollController.hasClients || _isLoading || _isLoadingMore || !_hasMore) {
+    if (!_scrollController.hasClients ||
+        _isLoading ||
+        _isLoadingMore ||
+        !_hasMore) {
       return;
     }
     final position = _scrollController.position;
@@ -257,10 +269,14 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
             valueListenable: _selectedIds,
             builder: (context, selectedIds, child) {
               return TextButton(
-                onPressed: () => Navigator.of(context).pop(selectedIds.toList()),
+                onPressed: () =>
+                    Navigator.of(context).pop(selectedIds.toList()),
                 child: Text(
                   '${l10n.done} (${selectedIds.length})',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               );
             },
@@ -285,7 +301,8 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
             children: [
               Text(_error!, style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 16),
-              if (_permissionState == PermissionState.denied || _permissionState == PermissionState.restricted)
+              if (_permissionState == PermissionState.denied ||
+                  _permissionState == PermissionState.restricted)
                 FilledButton(
                   onPressed: _openPermissionSettings,
                   child: Text(l10n.openSettings),
@@ -293,14 +310,15 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
               if (_permissionState == PermissionState.limited) ...[
                 FilledButton(
                   onPressed: _manageLimitedAccess,
-                  child: Text(Platform.isIOS ? l10n.manageSelectedPhotos : l10n.reviewAccessScope),
+                  child: Text(
+                    Platform.isIOS
+                        ? l10n.manageSelectedPhotos
+                        : l10n.reviewAccessScope,
+                  ),
                 ),
                 const SizedBox(height: 12),
               ],
-              FilledButton(
-                onPressed: _loadAssets,
-                child: Text(l10n.tryAgain),
-              ),
+              FilledButton(onPressed: _loadAssets, child: Text(l10n.tryAgain)),
             ],
           ),
         ),
@@ -370,7 +388,9 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
                   final asset = _assets[index];
                   final thumbnailFuture = _thumbnailFutures.putIfAbsent(
                     asset.id,
-                    () => asset.thumbnailDataWithSize(const ThumbnailSize(400, 400)),
+                    () => asset.thumbnailDataWithSize(
+                      const ThumbnailSize(400, 400),
+                    ),
                   );
                   return _AssetTile(
                     key: ValueKey(asset.id),
@@ -426,9 +446,7 @@ class _AssetTile extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   if (selected)
-                    Container(
-                      color: Colors.green.withValues(alpha: 0.28),
-                    ),
+                    Container(color: Colors.green.withValues(alpha: 0.28)),
                   Positioned(
                     top: 8,
                     right: 8,
@@ -436,7 +454,9 @@ class _AssetTile extends StatelessWidget {
                       width: 24,
                       height: 24,
                       decoration: BoxDecoration(
-                        color: selected ? const Color(0xFF22C55E) : Colors.black54,
+                        color: selected
+                            ? const Color(0xFF22C55E)
+                            : Colors.black54,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
@@ -474,7 +494,10 @@ class _AssetThumb extends StatelessWidget {
         if (data == null) {
           return Container(
             color: const Color(0xFF1F2937),
-            child: const Icon(Icons.image_not_supported_outlined, color: Colors.white54),
+            child: const Icon(
+              Icons.image_not_supported_outlined,
+              color: Colors.white54,
+            ),
           );
         }
         return Image.memory(data, fit: BoxFit.cover, gaplessPlayback: true);

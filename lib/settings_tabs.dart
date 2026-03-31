@@ -68,7 +68,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
           child: Column(
             children: [
               const SizedBox(height: 20),
-              Text(l10n.settings, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+              Text(
+                l10n.settings,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
               const SizedBox(height: 14),
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -143,10 +149,15 @@ class _AccountSettingsTab extends StatelessWidget {
       context: context,
       builder: (context) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 28,
+          ),
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -155,14 +166,20 @@ class _AccountSettingsTab extends StatelessWidget {
               children: [
                 Text(
                   l10n.privacyDialogTitle,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 Flexible(
                   child: SingleChildScrollView(
                     child: Text(
                       l10n.privacyDialogBody,
-                      style: const TextStyle(height: 1.6, color: Colors.black87),
+                      style: const TextStyle(
+                        height: 1.6,
+                        color: Colors.black87,
+                      ),
                     ),
                   ),
                 ),
@@ -201,13 +218,12 @@ class _AccountSettingsTab extends StatelessWidget {
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(l10n.notSignedIn, style: const TextStyle(color: Colors.black54)),
-                    const SizedBox(height: 16),
-                    Text(l10n.accountNotLinked, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
                     Text(
-                      l10n.accountHint,
-                      style: const TextStyle(color: Colors.black54, height: 1.4),
+                      l10n.accountNotLinked,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 18),
                     if (isAndroid)
@@ -243,7 +259,9 @@ class _AccountSettingsTab extends StatelessWidget {
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: Icon(
-                            authUser!.provider == 'google' ? Icons.alternate_email_rounded : Icons.apple_rounded,
+                            authUser!.provider == 'google'
+                                ? Icons.alternate_email_rounded
+                                : Icons.apple_rounded,
                             color: const Color(0xFF2F855A),
                           ),
                         ),
@@ -252,16 +270,30 @@ class _AccountSettingsTab extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(authUser!.displayName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              Text(
+                                authUser!.displayName,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                               const SizedBox(height: 4),
                               Text(
-                                authUser!.provider == 'google' ? l10n.googleLinked : l10n.appleLinked,
-                                style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2F855A)),
+                                authUser!.provider == 'google'
+                                    ? l10n.googleLinked
+                                    : l10n.appleLinked,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF2F855A),
+                                ),
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 l10n.cloudLinked,
-                                style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                ),
                               ),
                             ],
                           ),
@@ -269,18 +301,23 @@ class _AccountSettingsTab extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text(authUser!.email, style: const TextStyle(color: Colors.black54)),
+                    Text(
+                      authUser!.email,
+                      style: const TextStyle(color: Colors.black54),
+                    ),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                      onPressed: () => onSignOutPressed(),
-                      icon: const Icon(Icons.logout),
-                      label: Text(l10n.logout),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                      ),
+                        onPressed: () => onSignOutPressed(),
+                        icon: const Icon(Icons.logout),
+                        label: Text(l10n.logout),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -306,16 +343,22 @@ class _AccountSettingsTab extends StatelessWidget {
                     color: const Color(0xFFF4F7F5),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Icon(Icons.privacy_tip_outlined, color: Color(0xFF5E6D64)),
+                  child: const Icon(
+                    Icons.privacy_tip_outlined,
+                    color: Color(0xFF5E6D64),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(l10n.privacyPolicy, style: const TextStyle(fontWeight: FontWeight.w800)),
-                  ],
-                ),
+                      Text(
+                        l10n.privacyPolicy,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
                 ),
                 const Icon(Icons.chevron_right_rounded, color: Colors.black45),
               ],
@@ -339,7 +382,8 @@ class _NotificationSettingsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final timeLabel = '${settings.notificationHour.toString().padLeft(2, '0')}:${settings.notificationMinute.toString().padLeft(2, '0')}';
+    final timeLabel =
+        '${settings.notificationHour.toString().padLeft(2, '0')}:${settings.notificationMinute.toString().padLeft(2, '0')}';
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -353,7 +397,9 @@ class _NotificationSettingsTab extends StatelessWidget {
           ),
           child: SwitchListTile(
             value: settings.notificationsEnabled,
-            onChanged: (value) => onSettingsChanged(settings.copyWith(notificationsEnabled: value)),
+            onChanged: (value) => onSettingsChanged(
+              settings.copyWith(notificationsEnabled: value),
+            ),
             title: Text(l10n.useWateringNotification),
             subtitle: Text(l10n.useWateringNotificationHint),
             contentPadding: EdgeInsets.zero,
@@ -365,11 +411,17 @@ class _NotificationSettingsTab extends StatelessWidget {
           onTap: () async {
             final picked = await showTimePicker(
               context: context,
-              initialTime: TimeOfDay(hour: settings.notificationHour, minute: settings.notificationMinute),
+              initialTime: TimeOfDay(
+                hour: settings.notificationHour,
+                minute: settings.notificationMinute,
+              ),
             );
             if (picked != null) {
               await onSettingsChanged(
-                settings.copyWith(notificationHour: picked.hour, notificationMinute: picked.minute),
+                settings.copyWith(
+                  notificationHour: picked.hour,
+                  notificationMinute: picked.minute,
+                ),
               );
             }
           },
@@ -389,18 +441,27 @@ class _NotificationSettingsTab extends StatelessWidget {
                     color: const Color(0xFFEAF1FF),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(Icons.schedule_rounded, color: Color(0xFF335EC7)),
+                  child: const Icon(
+                    Icons.schedule_rounded,
+                    color: Color(0xFF335EC7),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(l10n.defaultNotificationTime, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text(
+                        l10n.defaultNotificationTime,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       const SizedBox(height: 4),
                       Text(
                         l10n.tapToChangeReminderTime,
-                        style: const TextStyle(color: Colors.black54, fontSize: 13),
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
@@ -409,9 +470,18 @@ class _NotificationSettingsTab extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(timeLabel, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    Text(
+                      timeLabel,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    const Icon(Icons.chevron_right_rounded, color: Colors.black45),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Colors.black45,
+                    ),
                   ],
                 ),
               ],
@@ -451,7 +521,9 @@ class _BrandLoginButton extends StatelessWidget {
           foregroundColor: foregroundColor,
           side: BorderSide(color: borderColor),
           minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 16),
         ),
         child: Row(
@@ -462,7 +534,10 @@ class _BrandLoginButton extends StatelessWidget {
               child: Text(
                 label,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             const SizedBox(width: 28),
