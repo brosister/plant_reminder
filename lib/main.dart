@@ -6,6 +6,7 @@ import 'auth_service.dart';
 import 'firebase_service.dart';
 import 'notification_service.dart';
 import 'photo_picker_page.dart';
+import 'plant_detail_page.dart';
 import 'plant_models.dart';
 import 'plant_photo_widgets.dart';
 import 'plant_storage_service.dart';
@@ -165,6 +166,24 @@ class _PlantRootPageState extends State<PlantRootPage> {
     }
   }
 
+  Future<void> _openPlantDetail(PlantItem plant) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (detailContext) => PlantDetailPage(
+          plant: plant,
+          onEdit: () async {
+            Navigator.of(detailContext).pop();
+            await _openEditPlantSheet(plant);
+          },
+          onWatered: () {
+            _markWatered(plant);
+            Navigator.of(detailContext).pop();
+          },
+        ),
+      ),
+    );
+  }
+
   Future<void> _showSettingsDialog() async {
     await showDialog<void>(
       context: context,
@@ -233,8 +252,8 @@ class _PlantRootPageState extends State<PlantRootPage> {
     }
 
     final pages = [
-      HomeTab(plants: _plants, onTapPlant: _openEditPlantSheet, onMarkWatered: _markWatered),
-      MyPlantsTab(plants: _plants, onTapPlant: _openEditPlantSheet, onAddPlant: _openAddPlantSheet),
+      HomeTab(plants: _plants, onTapPlant: _openPlantDetail, onMarkWatered: _markWatered),
+      MyPlantsTab(plants: _plants, onTapPlant: _openPlantDetail, onAddPlant: _openAddPlantSheet),
       CalendarTab(plants: _plants),
       StatsTab(plants: _plants),
     ];
