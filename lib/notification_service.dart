@@ -1,7 +1,9 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'app_localizations.dart';
 import 'app_settings_service.dart';
 import 'plant_models.dart';
 
@@ -52,19 +54,20 @@ class NotificationService {
     PlantItem plant, {
     required AppSettings settings,
   }) async {
+    final l10n = AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale);
     final scheduled = _nextReminderDateTime(plant, settings: settings);
     final id = plant.id.hashCode & 0x7fffffff;
 
     await _plugin.zonedSchedule(
       id,
-      '${plant.name} 물줄 시간',
-      '${plant.type} 물주기 확인이 필요해요.',
+      l10n.reminderTitle(plant.name),
+      l10n.reminderBody(plant.type),
       scheduled,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
           'plant_reminder_channel',
           'Plant Reminder',
-          channelDescription: '식물 물주기 알림 채널',
+          channelDescription: l10n.reminderChannelDescription(),
           importance: Importance.high,
           priority: Priority.high,
         ),

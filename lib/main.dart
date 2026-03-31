@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'ad_service.dart';
+import 'app_localizations.dart';
 import 'app_settings_service.dart';
+import 'auth_session_service.dart';
 import 'auth_service.dart';
 import 'firebase_service.dart';
 import 'notification_service.dart';
@@ -11,8 +15,10 @@ import 'plant_detail_page.dart';
 import 'plant_models.dart';
 import 'plant_preset_service.dart';
 import 'plant_photo_widgets.dart';
+import 'plant_sync_service.dart';
 import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
+import 'sync_state_service.dart';
 
 void main() {
   runApp(const PlantReminderApp());
@@ -25,7 +31,21 @@ class PlantReminderApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '식물 물주기 알리미',
+      onGenerateTitle: (context) => context.l10n.appTitle,
+      localeResolutionCallback: (locale, supportedLocales) {
+        if (locale == null) return const Locale('en');
+        if (['ko', 'en', 'zh', 'ja'].contains(locale.languageCode)) {
+          return Locale(locale.languageCode);
+        }
+        return const Locale('en');
+      },
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F855A)),
         scaffoldBackgroundColor: const Color(0xFFF6FBF7),
@@ -71,8 +91,11 @@ class PlantRootPage extends StatefulWidget {
 class _PlantRootPageState extends State<PlantRootPage> {
   int _currentIndex = 0;
   BannerAd? _bannerAd;
+  bool _isBannerLoading = false;
+  int? _bannerWidth;
   AppAuthUser? _authUser;
   bool _isSigningIn = false;
+  bool _isSyncing = false;
   bool _isLoading = true;
   List<PlantPreset> _plantPresets = List<PlantPreset>.from(kPlantPresets);
   AppSettings _settings = const AppSettings(
@@ -124,9 +147,11 @@ class _PlantRootPageState extends State<PlantRootPage> {
   Future<void> _bootstrap() async {
     await FirebaseService.init();
     await NotificationService.init();
+    await AdService.init();
     final stored = await PlantStorageService.loadPlants();
     final loadedSettings = await AppSettingsService.load();
     final loadedPresets = await PlantPresetService.loadPresets();
+    final savedAuthUser = await AuthSessionService.loadUser();
     if (stored.isNotEmpty) {
       _plants
         ..clear()
@@ -136,6 +161,10 @@ class _PlantRootPageState extends State<PlantRootPage> {
       _plantPresets = loadedPresets;
     }
     _settings = loadedSettings;
+    _authUser = savedAuthUser;
+    if (savedAuthUser != null) {
+      await _restoreCloudDataIfNeeded(savedAuthUser);
+    }
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     if (!mounted) return;
     setState(() {
@@ -146,6 +175,79 @@ class _PlantRootPageState extends State<PlantRootPage> {
   Future<void> _persistPlants() async {
     await PlantStorageService.savePlants(_plants);
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
+    await _syncCurrentStateIfLinked();
+  }
+
+  Future<void> _persistSettingsOnly() async {
+    await AppSettingsService.save(_settings);
+    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
+    await _syncCurrentStateIfLinked();
+  }
+
+  Future<void> _restoreCloudDataIfNeeded(AppAuthUser user) async {
+    try {
+      final profile = await PlantSyncService.fetchProfile(user);
+      final syncState = await SyncStateService.load();
+      final sameUser = syncState.userKey == SyncStateService.userKeyFor(user);
+      if (!profile.exists) {
+        if (_plants.isNotEmpty) {
+          final result = await PlantSyncService.replaceWithLocal(
+            user: user,
+            plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+            settings: _settings,
+          );
+          await SyncStateService.markSynced(user, result.updatedAt);
+        }
+        return;
+      }
+
+      final hasLocalData = _plants.isNotEmpty;
+      final serverNewer = profile.updatedAt != null &&
+          sameUser &&
+          syncState.lastSyncedAt != null &&
+          profile.updatedAt!.isAfter(syncState.lastSyncedAt!);
+
+      if (!hasLocalData || (sameUser && !syncState.isDirty && serverNewer)) {
+        await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+      }
+    } catch (_) {
+      // Keep local data when cloud sync is unavailable during bootstrap.
+    }
+  }
+
+  Future<void> _applySyncedData(
+    AppAuthUser user,
+    List<PlantItem> plants,
+    AppSettings settings,
+    DateTime? syncedAt,
+  ) async {
+    _plants
+      ..clear()
+      ..addAll(plants.map((item) => item.copy()));
+    _settings = settings;
+    await PlantStorageService.savePlants(_plants);
+    await AppSettingsService.save(_settings);
+    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
+    await SyncStateService.markSynced(user, syncedAt);
+  }
+
+  Future<void> _syncCurrentStateIfLinked() async {
+    final user = _authUser;
+    if (user == null || _isSyncing) return;
+    await SyncStateService.markDirty(user);
+    _isSyncing = true;
+    try {
+      final result = await PlantSyncService.replaceWithLocal(
+        user: user,
+        plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+        settings: _settings,
+      );
+      await SyncStateService.markSynced(user, result.updatedAt);
+    } catch (_) {
+      // Keep local dirty flag so we can retry later.
+    } finally {
+      _isSyncing = false;
+    }
   }
 
   void _showToast(String message) {
@@ -158,7 +260,8 @@ class _PlantRootPageState extends State<PlantRootPage> {
       plant.lastWateredAt = DateTime.now();
     });
     _persistPlants();
-    _showToast('${plant.name} 물주기 완료');
+    AdService.showInterstitialIfNeeded();
+    _showToast(AppLocalizations.of(context).wateredToast(plant.name));
   }
 
   void _savePlant(PlantItem plant, {bool isNew = false}) {
@@ -173,6 +276,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       }
     });
     _persistPlants();
+    AdService.showInterstitialIfNeeded();
   }
 
   Future<void> _openAddPlantSheet() async {
@@ -233,16 +337,67 @@ class _PlantRootPageState extends State<PlantRootPage> {
     );
   }
 
+  Future<_SyncResolution?> _showSyncChoiceDialog({
+    required PlantSyncProfile profile,
+  }) {
+    final l10n = context.l10n;
+    return showDialog<_SyncResolution>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(l10n.syncChoiceTitle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                Text(l10n.syncChoiceBody, style: const TextStyle(color: Colors.black54, height: 1.5)),
+                const SizedBox(height: 16),
+                _SyncSummaryCard(title: l10n.syncDeviceSummary, plantCount: _plants.length),
+                const SizedBox(height: 10),
+                _SyncSummaryCard(title: l10n.syncServerSummary, plantCount: profile.plants.length),
+                const SizedBox(height: 18),
+                _SyncChoiceButton(
+                  title: l10n.syncUseServer,
+                  subtitle: l10n.syncChoiceServerHint,
+                  accent: const Color(0xFF4C8BF5),
+                  onTap: () => Navigator.of(context).pop(_SyncResolution.server),
+                ),
+                const SizedBox(height: 10),
+                _SyncChoiceButton(
+                  title: l10n.syncUseLocal,
+                  subtitle: l10n.syncChoiceLocalHint,
+                  accent: const Color(0xFF2F855A),
+                  onTap: () => Navigator.of(context).pop(_SyncResolution.local),
+                ),
+                const SizedBox(height: 10),
+                _SyncChoiceButton(
+                  title: l10n.syncMerge,
+                  subtitle: l10n.syncChoiceMergeHint,
+                  accent: const Color(0xFFF59E0B),
+                  onTap: () => Navigator.of(context).pop(_SyncResolution.merge),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _handleSettingsChanged(AppSettings settings) async {
     setState(() {
       _settings = settings;
     });
-    await AppSettingsService.save(settings);
-    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
+    await _persistSettingsOnly();
   }
 
   Future<void> _handlePlatformSignIn() async {
     if (_isSigningIn) return;
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _isSigningIn = true;
     });
@@ -250,14 +405,57 @@ class _PlantRootPageState extends State<PlantRootPage> {
       final user = await AuthService.instance.signInForCurrentPlatform();
       if (!mounted) return;
       if (user != null) {
+        String? syncToast;
+        await AuthSessionService.saveUser(user);
+        final profile = await PlantSyncService.fetchProfile(user);
+        final hasLocalData = _plants.isNotEmpty;
+        if (profile.exists && hasLocalData) {
+          final resolution = await _showSyncChoiceDialog(profile: profile);
+          if (!mounted || resolution == null) return;
+          switch (resolution) {
+            case _SyncResolution.server:
+              await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+              syncToast = l10n.syncImported;
+              break;
+            case _SyncResolution.local:
+              final uploaded = await PlantSyncService.replaceWithLocal(
+                user: user,
+                plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+                settings: _settings,
+              );
+              await SyncStateService.markSynced(user, uploaded.updatedAt);
+              syncToast = l10n.syncUploaded;
+              break;
+            case _SyncResolution.merge:
+              final merged = await PlantSyncService.mergeWithServer(
+                user: user,
+                localPlants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+                localSettings: _settings,
+              );
+              await _applySyncedData(user, merged.plants, merged.settings, merged.updatedAt);
+              syncToast = l10n.syncMerged;
+              break;
+          }
+        } else if (profile.exists && !hasLocalData) {
+          await _applySyncedData(user, profile.plants, profile.settings, profile.updatedAt);
+          syncToast = l10n.syncImported;
+        } else if (!profile.exists && hasLocalData) {
+          final uploaded = await PlantSyncService.replaceWithLocal(
+            user: user,
+            plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+            settings: _settings,
+          );
+          await SyncStateService.markSynced(user, uploaded.updatedAt);
+          syncToast = l10n.syncUploaded;
+        }
         setState(() {
           _authUser = user;
         });
-        _showToast('${user.provider == 'google' ? '구글' : '애플'} 로그인 성공');
+        _showToast(syncToast ?? l10n.loginSuccessToast(user.provider == 'google' ? 'Google' : 'Apple'));
       }
     } catch (error) {
       if (!mounted) return;
-      _showToast('로그인에 실패했습니다.');
+      _showToast(l10n.syncFailed);
     } finally {
       if (mounted) {
         setState(() {
@@ -269,17 +467,38 @@ class _PlantRootPageState extends State<PlantRootPage> {
 
   Future<void> _handleSignOut() async {
     await AuthService.instance.signOut(provider: _authUser?.provider);
+    await AuthSessionService.clear();
+    await SyncStateService.clear();
     if (!mounted) return;
     setState(() {
       _authUser = null;
     });
-    _showToast('로그아웃 되었습니다.');
+    _showToast(AppLocalizations.of(context).logoutDone);
   }
 
   @override
   void dispose() {
     _bannerAd?.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBannerForWidth(int width) async {
+    if (_isBannerLoading || width <= 0 || _bannerWidth == width) return;
+    _isBannerLoading = true;
+    final banner = await AdService.loadBanner(width);
+    if (!mounted) {
+      banner?.dispose();
+      _isBannerLoading = false;
+      return;
+    }
+
+    final oldBanner = _bannerAd;
+    setState(() {
+      _bannerAd = banner;
+      _bannerWidth = banner == null ? null : width;
+    });
+    oldBanner?.dispose();
+    _isBannerLoading = false;
   }
 
   @override
@@ -292,37 +511,49 @@ class _PlantRootPageState extends State<PlantRootPage> {
 
     final pages = [
       HomeTab(plants: _plants, onTapPlant: _openPlantDetail, onMarkWatered: _markWatered),
-      MyPlantsTab(plants: _plants, onTapPlant: _openPlantDetail, onAddPlant: _openAddPlantSheet),
+      MyPlantsTab(
+        plants: _plants,
+        presets: _plantPresets,
+        onTapPlant: _openPlantDetail,
+        onAddPlant: _openAddPlantSheet,
+      ),
       CalendarTab(plants: _plants),
       StatsTab(plants: _plants),
     ];
+    final l10n = context.l10n;
     final navItems = [
-      const _NavItemData(
-        label: '홈',
-        subtitle: '오늘 할 일을 먼저 챙겨봐요.',
+      _NavItemData(
+        label: l10n.home,
+        subtitle: l10n.homeSubtitle,
         icon: Icons.home_rounded,
-        color: Color(0xFF53B97C),
+        color: const Color(0xFF53B97C),
       ),
-      const _NavItemData(
-        label: '나의 식물',
-        subtitle: '내 식물을 등록하고 메모와 물주기 주기를 관리하세요.',
+      _NavItemData(
+        label: l10n.myPlants,
+        subtitle: l10n.myPlantsSubtitle,
         icon: Icons.local_florist_rounded,
-        color: Color(0xFF5BC0A5),
+        color: const Color(0xFF5BC0A5),
       ),
-      const _NavItemData(
-        label: '달력',
-        subtitle: '다음 물주기 일정을 날짜 순으로 확인합니다.',
+      _NavItemData(
+        label: l10n.calendar,
+        subtitle: l10n.calendarSubtitle,
         icon: Icons.calendar_month_rounded,
-        color: Color(0xFFFFB648),
+        color: const Color(0xFFFFB648),
       ),
-      const _NavItemData(
-        label: '통계',
-        subtitle: '식물 관리 흐름을 숫자로 빠르게 확인하세요.',
+      _NavItemData(
+        label: l10n.stats,
+        subtitle: l10n.statsSubtitle,
         icon: Icons.bar_chart_rounded,
-        color: Color(0xFFFF8E72),
+        color: const Color(0xFFFF8E72),
       ),
     ];
     final activeNav = navItems[_currentIndex];
+    final bannerWidth = MediaQuery.sizeOf(context).width.truncate();
+    if (_bannerWidth != bannerWidth && !_isBannerLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadBannerForWidth(bannerWidth);
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -351,25 +582,12 @@ class _PlantRootPageState extends State<PlantRootPage> {
             child: IconButton(
               onPressed: _showSettingsDialog,
               icon: const Icon(Icons.settings_rounded),
-              tooltip: '설정',
+              tooltip: l10n.settings,
             ),
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(child: pages[_currentIndex]),
-            if (_bannerAd != null)
-              Container(
-                color: Colors.white,
-                width: _bannerAd!.size.width.toDouble(),
-                height: _bannerAd!.size.height.toDouble(),
-                child: AdWidget(ad: _bannerAd!),
-              ),
-          ],
-        ),
-      ),
+      body: SafeArea(child: pages[_currentIndex]),
       floatingActionButton: _currentIndex == 1
           ? FloatingActionButton(
               onPressed: _openAddPlantSheet,
@@ -384,10 +602,99 @@ class _PlantRootPageState extends State<PlantRootPage> {
               child: const Icon(Icons.add_rounded, size: 30),
             )
           : null,
-      bottomNavigationBar: _GardenBottomNav(
-        items: navItems,
-        selectedIndex: _currentIndex,
-        onSelected: (value) => setState(() => _currentIndex = value),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _GardenBottomNav(
+            items: navItems,
+            selectedIndex: _currentIndex,
+            onSelected: (value) => setState(() => _currentIndex = value),
+            extraBottomPadding: _bannerAd == null ? MediaQuery.of(context).viewPadding.bottom : 0,
+          ),
+          if (_bannerAd != null)
+            Container(
+              width: double.infinity,
+              color: Colors.white,
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewPadding.bottom),
+              child: SizedBox(
+                width: double.infinity,
+                height: _bannerAd!.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd!),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _SyncResolution { server, local, merge }
+
+class _SyncSummaryCard extends StatelessWidget {
+  const _SyncSummaryCard({
+    required this.title,
+    required this.plantCount,
+  });
+
+  final String title;
+  final int plantCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7FAF8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2EBE5)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+          Text('$plantCount', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SyncChoiceButton extends StatelessWidget {
+  const _SyncChoiceButton({
+    required this.title,
+    required this.subtitle,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: accent.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text(subtitle, style: const TextStyle(color: Colors.black54, height: 1.4)),
+          ],
+        ),
       ),
     );
   }
@@ -407,10 +714,12 @@ class HomeTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final todayTasks = plants.where((plant) => plant.status == PlantStatus.today || plant.status == PlantStatus.overdue).toList();
     final soonTasks = plants.where((plant) => plant.status == PlantStatus.soon).toList();
     final healthyCount = plants.where((plant) => plant.status == PlantStatus.healthy).length;
-    final streakMessage = todayTasks.isEmpty ? '오늘은 한결 여유로운 날이에요.' : '지금 챙기면 식물 컨디션을 더 예쁘게 유지할 수 있어요.';
+    final streakMessage = l10n.todayTaskStreak(todayTasks.isNotEmpty);
+    final primaryPlant = todayTasks.isNotEmpty ? todayTasks.first : (soonTasks.isNotEmpty ? soonTasks.first : (plants.isNotEmpty ? plants.first : null));
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 112),
@@ -418,109 +727,108 @@ class HomeTab extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(30),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF275F47), Color(0xFF4BAF7C)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x1F2F855A),
-                blurRadius: 28,
-                offset: Offset(0, 14),
-              ),
-            ],
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(color: const Color(0xFFE4ECE6)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 46,
-                    height: 46,
+                    width: 52,
+                    height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(16),
+                      color: const Color(0xFFF1DFC7),
+                      borderRadius: BorderRadius.circular(18),
                     ),
-                    child: const Icon(Icons.spa_rounded, color: Colors.white),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Image.asset(
+                        'assets/branding/app_logo.png',
+                        fit: BoxFit.contain,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      '오늘의 가드닝 루틴',
-                      style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '식물 ${plants.length}개',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          l10n.todayRoutine,
+                          style: const TextStyle(color: Color(0xFF66756C), fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          l10n.plantCount(plants.length),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 18),
               Text(
-                todayTasks.isEmpty ? '오늘은 쉬어가는\n가벼운 식물 케어' : '오늘 바로 확인할\n식물이 ${todayTasks.length}개 있어요',
+                todayTasks.isEmpty ? l10n.todayCareRelaxed : l10n.todayPlantsHeadline(todayTasks.length),
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 30,
+                  color: Color(0xFF111A16),
+                  fontSize: 28,
                   fontWeight: FontWeight.w800,
-                  height: 1.15,
+                  height: 1.18,
                 ),
               ),
               const SizedBox(height: 10),
               Text(
                 streakMessage,
-                style: const TextStyle(color: Colors.white70, height: 1.5),
+                style: const TextStyle(color: Colors.black54, height: 1.5),
               ),
               const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(child: _HighlightMetric(label: '오늘 관리', value: '${todayTasks.length}')),
-                  const SizedBox(width: 10),
-                  Expanded(child: _HighlightMetric(label: '곧 필요', value: '${soonTasks.length}')),
-                  const SizedBox(width: 10),
-                  Expanded(child: _HighlightMetric(label: '안정 상태', value: '$healthyCount')),
-                ],
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7FAF8),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: _HomeMiniStat(label: l10n.todayTasks, value: l10n.highlightValueCount(todayTasks.length))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _HomeMiniStat(label: l10n.soonNeed, value: l10n.highlightValueCount(soonTasks.length))),
+                    const SizedBox(width: 10),
+                    Expanded(child: _HomeMiniStat(label: l10n.healthyState, value: l10n.highlightValueCount(healthyCount))),
+                  ],
+                ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(
-              child: _GlassSummaryCard(
-                title: '오늘 우선순위',
-                subtitle: todayTasks.isEmpty ? '급한 식물 없음' : '바로 물주기 추천',
-                value: todayTasks.isEmpty ? '여유로움' : '${todayTasks.length}개 우선',
-                accent: const Color(0xFFFFB648),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _GlassSummaryCard(
-                title: '다음 체크',
-                subtitle: soonTasks.isEmpty ? '예정 없음' : '곧 다가옴',
-                value: soonTasks.isEmpty ? '안정적' : '${soonTasks.length}개 예정',
-                accent: const Color(0xFF5BC0A5),
-              ),
-            ),
-          ],
+        _HomeOverviewCard(
+          title: l10n.todayPriority,
+          value: todayTasks.isEmpty ? l10n.relaxed : l10n.priorityValue(todayTasks.length),
+          subtitle: todayTasks.isEmpty
+              ? l10n.noUrgentPlants
+              : (primaryPlant == null ? l10n.recommendWateringNow : '${primaryPlant.name} · ${primaryPlant.location}'),
+          accent: todayTasks.isEmpty ? const Color(0xFF8AA39A) : const Color(0xFF2F855A),
+        ),
+        const SizedBox(height: 12),
+        _HomeOverviewCard(
+          title: l10n.nextCheck,
+          value: soonTasks.isEmpty ? l10n.stable : l10n.scheduledValue(soonTasks.length),
+          subtitle: soonTasks.isEmpty
+              ? l10n.nothingScheduled
+              : '${soonTasks.first.name} · ${l10n.nextDateLabel(soonTasks.first.nextWateringAt)}',
+          accent: const Color(0xFF5B8DEF),
         ),
         const SizedBox(height: 24),
-        const _SectionTitle(title: '오늘 해야 할 일', subtitle: '급한 순서대로 바로 처리할 수 있게 정리했어요.'),
+        _SectionTitle(title: l10n.todayTodo, subtitle: l10n.todayTodoHint),
         const SizedBox(height: 12),
         if (todayTasks.isEmpty)
-          const EmptyCard(message: '오늘 바로 처리할 식물은 없습니다.')
+          EmptyCard(message: l10n.noPlantForToday)
         else
           ...todayTasks.map(
             (plant) => PlantActionCard(
@@ -530,10 +838,10 @@ class HomeTab extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 20),
-        const _SectionTitle(title: '곧 확인할 식물', subtitle: '하루 이틀 안에 체크하면 좋은 식물들이에요.'),
+        _SectionTitle(title: l10n.checkSoonPlants, subtitle: l10n.checkSoonPlantsHint),
         const SizedBox(height: 12),
         if (soonTasks.isEmpty)
-          const EmptyCard(message: '곧 물줄 식물이 아직 없습니다.')
+          EmptyCard(message: l10n.noSoonPlants)
         else
           ...soonTasks.map((plant) => CompactPlantCard(plant: plant, onTap: () => onTapPlant(plant))),
       ],
@@ -541,60 +849,222 @@ class HomeTab extends StatelessWidget {
   }
 }
 
-class MyPlantsTab extends StatelessWidget {
+class MyPlantsTab extends StatefulWidget {
   const MyPlantsTab({
     super.key,
     required this.plants,
+    required this.presets,
     required this.onTapPlant,
     required this.onAddPlant,
   });
 
   final List<PlantItem> plants;
+  final List<PlantPreset> presets;
   final ValueChanged<PlantItem> onTapPlant;
   final VoidCallback onAddPlant;
 
   @override
+  State<MyPlantsTab> createState() => _MyPlantsTabState();
+}
+
+class _MyPlantsTabState extends State<MyPlantsTab> {
+  PlantStatus? _selectedStatus;
+
+  @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final filteredPlants = _selectedStatus == null
+        ? widget.plants
+        : widget.plants.where((plant) => plant.status == _selectedStatus).toList();
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 110),
-        itemCount: plants.length + 1,
+        itemCount: filteredPlants.length + 2,
         separatorBuilder: (context, index) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
-            return Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE6F8EF),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(Icons.eco_rounded, color: Color(0xFF2F855A)),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Text(
-                      '등록한 식물을 눌러 사진, 메모, 물주기 주기를 바로 수정할 수 있어요.',
-                      style: TextStyle(height: 1.4, color: Colors.black54),
-                    ),
-                  ),
-                  IconButton.filledTonal(onPressed: onAddPlant, icon: const Icon(Icons.add_rounded)),
-                ],
-              ),
+            return _MyPlantsIntroCard(
+              guideText: l10n.myPlantsGuide,
+              onAddPlant: widget.onAddPlant,
             );
           }
-          final plant = plants[index - 1];
-          return PlantListCard(plant: plant, onTap: () => onTapPlant(plant));
+          if (index == 1) {
+            return _MyPlantsStatusFilterCard(
+              selectedStatus: _selectedStatus,
+              plants: widget.plants,
+              onStatusSelected: (status) {
+                setState(() {
+                  _selectedStatus = status;
+                });
+              },
+            );
+          }
+          final plant = filteredPlants[index - 2];
+          final matchedPreset = widget.presets.cast<PlantPreset?>().firstWhere(
+                (preset) => preset?.type == plant.type,
+                orElse: () => null,
+              );
+          return PlantListCard(
+            plant: plant,
+            presetImageUrl: matchedPreset?.imageUrl,
+            onTap: () => widget.onTapPlant(plant),
+          );
         },
+      ),
+    );
+  }
+}
+
+class _MyPlantsIntroCard extends StatelessWidget {
+  const _MyPlantsIntroCard({
+    required this.guideText,
+    required this.onAddPlant,
+  });
+
+  final String guideText;
+  final VoidCallback onAddPlant;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE6F8EF),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(Icons.eco_rounded, color: Color(0xFF2F855A)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              guideText,
+              style: const TextStyle(height: 1.4, color: Colors.black54),
+            ),
+          ),
+          IconButton.filledTonal(onPressed: onAddPlant, icon: const Icon(Icons.add_rounded)),
+        ],
+      ),
+    );
+  }
+}
+
+class _MyPlantsStatusFilterCard extends StatelessWidget {
+  const _MyPlantsStatusFilterCard({
+    required this.selectedStatus,
+    required this.plants,
+    required this.onStatusSelected,
+  });
+
+  final PlantStatus? selectedStatus;
+  final List<PlantItem> plants;
+  final ValueChanged<PlantStatus?> onStatusSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE5ECE7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.statusFilterGuide,
+            style: const TextStyle(color: Colors.black54, height: 1.45),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _PlantStatusFilterChip(
+                label: l10n.allPlants,
+                count: plants.length,
+                color: const Color(0xFF425249),
+                isSelected: selectedStatus == null,
+                onTap: () => onStatusSelected(null),
+              ),
+              for (final status in PlantStatus.values)
+                _PlantStatusFilterChip(
+                  label: _statusText(status),
+                  count: plants.where((plant) => plant.status == status).length,
+                  color: _statusColor(status),
+                  isSelected: selectedStatus == status,
+                  onTap: () => onStatusSelected(status),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlantStatusFilterChip extends StatelessWidget {
+  const _PlantStatusFilterChip({
+    required this.label,
+    required this.count,
+    required this.color,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withValues(alpha: 0.16) : color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: isSelected ? color.withValues(alpha: 0.45) : color.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$label $count',
+              style: TextStyle(
+                color: const Color(0xFF223028),
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -630,6 +1100,7 @@ class _CalendarTabState extends State<CalendarTab> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final monthlyPlants = [...widget.plants]
       ..retainWhere(
         (plant) =>
@@ -682,12 +1153,12 @@ class _CalendarTabState extends State<CalendarTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${_monthLabel(_visibleMonth)} 관리 예정', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(l10n.pageLabelManageMonth(_visibleMonth), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 if (monthlyPlants.isEmpty)
-                  const Text(
-                    '이 달에 예정된 물주기 일정이 없습니다.',
-                    style: TextStyle(color: Colors.black54),
+                  Text(
+                    l10n.calendarNoSchedule,
+                    style: const TextStyle(color: Colors.black54),
                   )
                 else
                   ...monthlyPlants.map(
@@ -705,7 +1176,7 @@ class _CalendarTabState extends State<CalendarTab> {
                             child: Column(
                               children: [
                                 Text('${plant.nextWateringAt.day}', style: TextStyle(color: _statusColor(plant.status), fontWeight: FontWeight.bold, fontSize: 18)),
-                                Text(_weekdayKor(plant.nextWateringAt.weekday), style: TextStyle(color: _statusColor(plant.status), fontSize: 12)),
+                                Text(l10n.weekdayShort(plant.nextWateringAt.weekday), style: TextStyle(color: _statusColor(plant.status), fontSize: 12)),
                               ],
                             ),
                           ),
@@ -768,6 +1239,7 @@ class _MonthCalendarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final firstDay = DateTime(month.year, month.month, 1);
     final lastDay = DateTime(month.year, month.month + 1, 0);
     final leadingEmpty = firstDay.weekday % 7;
@@ -776,7 +1248,10 @@ class _MonthCalendarCard extends StatelessWidget {
     final today = DateTime.now();
 
     final cells = <Widget>[
-      for (final label in const ['일', '월', '화', '수', '목', '금', '토'])
+      for (final label in <String>['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].asMap().entries.map((entry) {
+        const weekdayMap = [7, 1, 2, 3, 4, 5, 6];
+        return l10n.weekdayShort(weekdayMap[entry.key]);
+      }))
         Center(
           child: Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -814,15 +1289,15 @@ class _MonthCalendarCard extends StatelessWidget {
               const Icon(Icons.calendar_today_rounded, size: 18, color: Color(0xFF2F855A)),
               const SizedBox(width: 8),
               Text(
-                '${month.year}년 ${month.month}월 캘린더',
+                l10n.monthCalendarTitle(month),
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
-            '물주기 일정이 있는 날에는 초록 점과 개수로 표시돼요.',
-            style: TextStyle(color: Colors.black54, height: 1.4),
+          Text(
+            l10n.calendarBadgeHint,
+            style: const TextStyle(color: Colors.black54, height: 1.4),
           ),
           const SizedBox(height: 16),
           GridView.count(
@@ -923,6 +1398,7 @@ class StatsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final total = plants.length;
     final healthy = plants.where((plant) => plant.status == PlantStatus.healthy).length;
     final dueToday = plants.where((plant) => plant.status == PlantStatus.today).length;
@@ -944,23 +1420,23 @@ class StatsTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  '한눈에 보는 식물 상태',
+                Text(
+                  l10n.statsTitle,
                   style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   strongestPlant == null
-                      ? '등록된 식물이 아직 없어요.'
-                      : '${strongestPlant.name}부터 루틴을 챙기면 오늘 관리가 훨씬 쉬워져요.',
+                      ? l10n.noPlantsYet
+                      : l10n.overallStatsHint(strongestPlant.name),
                   style: const TextStyle(color: Color(0xBFFFFFFF), height: 1.45),
                 ),
                 const SizedBox(height: 20),
                 Row(
                   children: [
-                    Expanded(child: _DarkMetricTile(label: '등록 식물', value: '$total개', accent: const Color(0xFF5BC0A5))),
+                    Expanded(child: _DarkMetricTile(label: '등록 식물', value: l10n.registeredPlantsCount(total), accent: const Color(0xFF5BC0A5))),
                     const SizedBox(width: 10),
-                    Expanded(child: _DarkMetricTile(label: '평균 주기', value: avgCycle == 0 ? '-' : '$avgCycle일', accent: const Color(0xFFFFD166))),
+                    Expanded(child: _DarkMetricTile(label: '평균 주기', value: l10n.averageCycle(avgCycle), accent: const Color(0xFFFFD166))),
                   ],
                 ),
               ],
@@ -975,10 +1451,10 @@ class StatsTab extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             childAspectRatio: 0.9,
             children: [
-              _SoftStatCard(title: '안정 상태', value: '$healthy개', detail: '건강하게 유지 중', color: const Color(0xFF2B9348), icon: Icons.favorite_rounded),
-              _SoftStatCard(title: '오늘 물주기', value: '$dueToday개', detail: '오늘 체크 필요', color: const Color(0xFFF59E0B), icon: Icons.water_drop_rounded),
-              _SoftStatCard(title: '오래 방치', value: '$overdue개', detail: '가장 먼저 챙겨주세요', color: const Color(0xFFDC2626), icon: Icons.crisis_alert_rounded),
-              _SoftStatCard(title: '전체 루틴', value: '$total개', detail: '기록 중인 식물 수', color: const Color(0xFF2F855A), icon: Icons.local_florist_rounded),
+              _SoftStatCard(title: l10n.healthyState, value: l10n.healthyKeep(healthy), detail: l10n.healthyDesc, color: const Color(0xFF2B9348), icon: Icons.favorite_rounded),
+              _SoftStatCard(title: l10n.todayWatering, value: l10n.dueTodayCount(dueToday), detail: l10n.todayDesc, color: const Color(0xFFF59E0B), icon: Icons.water_drop_rounded),
+              _SoftStatCard(title: l10n.overdue, value: l10n.overdueCount(overdue), detail: l10n.overdueDesc, color: const Color(0xFFDC2626), icon: Icons.crisis_alert_rounded),
+              _SoftStatCard(title: '전체 루틴', value: l10n.totalPlantsMetric(total), detail: '기록 중인 식물 수', color: const Color(0xFF2F855A), icon: Icons.local_florist_rounded),
             ],
           ),
           const SizedBox(height: 20),
@@ -998,9 +1474,9 @@ class StatsTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('물주기 주기 흐름', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                Text(l10n.statsCycleFlow, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 6),
-                const Text('식물마다 주기가 얼마나 다른지 한 번에 볼 수 있어요.', style: TextStyle(color: Colors.black54)),
+                Text(l10n.statsCycleFlowHint, style: const TextStyle(color: Colors.black54)),
                 const SizedBox(height: 16),
                 ...plants.map((plant) {
                   final ratio = (plant.wateringCycleDays / 21).clamp(0.1, 1.0);
@@ -1018,7 +1494,7 @@ class StatsTab extends StatelessWidget {
                                 color: _statusColor(plant.status).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: Text('${plant.wateringCycleDays}일 주기'),
+                              child: Text(l10n.cycleDaysLabel(plant.wateringCycleDays)),
                             ),
                           ],
                         ),
@@ -1037,7 +1513,7 @@ class StatsTab extends StatelessWidget {
                   );
                 }),
                 const Divider(height: 28),
-                Text('평균 물주기 주기: ${avgCycle == 0 ? '-' : '$avgCycle일'}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text('평균 물주기 주기: ${l10n.averageCycle(avgCycle)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               ],
             ),
           ),
@@ -1065,8 +1541,8 @@ class StatsTab extends StatelessWidget {
                   Expanded(
                     child: Text(
                       overdue > 0
-                          ? '오래 방치된 식물이 $overdue개 있어요. 오늘은 급한 식물부터 물주기 체크를 시작해보세요.'
-                          : '전체적으로 관리 흐름이 안정적이에요. 오늘 물주기 예정 식물만 가볍게 확인하면 됩니다.',
+                          ? l10n.oldestOverdueHint
+                          : l10n.stableFlowHint,
                       style: const TextStyle(height: 1.5, color: Colors.black87),
                     ),
                   ),
@@ -1084,17 +1560,18 @@ class _GardenBottomNav extends StatelessWidget {
     required this.items,
     required this.selectedIndex,
     required this.onSelected,
+    required this.extraBottomPadding,
   });
 
   final List<_NavItemData> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final double extraBottomPadding;
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(14, 8, 14, bottomInset + 12),
+      padding: EdgeInsets.fromLTRB(14, 8, 14, 12 + extraBottomPadding),
       child: Container(
         height: 92,
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
@@ -1393,6 +1870,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
+    final l10n = context.l10n;
     final bottomInset = mediaQuery.viewInsets.bottom;
     final bottomSafeArea = mediaQuery.viewPadding.bottom;
     final sheetHeight = mediaQuery.size.height * 0.8;
@@ -1445,14 +1923,14 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      isEditing ? '식물 정보 다듬기' : '새 식물 등록하기',
+                                      isEditing ? l10n.plantInfoEdit : l10n.newPlantRegister,
                                       style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       isEditing
-                                          ? '사진, 메모, 물주기 루틴을 한 번에 정리해보세요.'
-                                          : '식물 이름과 루틴을 가볍게 입력하고 바로 관리 시작할 수 있어요.',
+                                          ? l10n.plantInfoEditHint
+                                          : l10n.newPlantRegisterHint,
                                       style: const TextStyle(color: Colors.black54, height: 1.4),
                                     ),
                                   ],
@@ -1467,7 +1945,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                             children: [
                               _InfoPill(
                                 icon: Icons.water_drop_rounded,
-                                label: '${_cycleController.text.trim().isEmpty ? _selectedPreset.defaultWateringCycleDays : _cycleController.text.trim()}일 주기',
+                                label: l10n.cycleDaysLabel(int.tryParse(_cycleController.text.trim()) ?? _selectedPreset.defaultWateringCycleDays),
                                 tint: const Color(0xFFE8F5EC),
                               ),
                               _InfoPill(
@@ -1477,7 +1955,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                               ),
                               _InfoPill(
                                 icon: Icons.photo_library_rounded,
-                                label: _photoAssetIds.isEmpty ? '사진 없음' : '${_photoAssetIds.length}장 선택',
+                                label: _photoAssetIds.isEmpty ? l10n.noPhoto : l10n.selectedPhotoCount(_photoAssetIds.length),
                                 tint: const Color(0xFFEAF1FF),
                               ),
                             ],
@@ -1488,8 +1966,8 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                     const SizedBox(height: 18),
                     _buildSectionCard(
                       icon: Icons.local_florist_rounded,
-                      title: '기본 정보',
-                      subtitle: '식물 종류와 이름, 위치를 먼저 정리해둘게요.',
+                      title: l10n.basicInfo,
+                      subtitle: l10n.basicInfoHint,
                       child: Column(
                         children: [
                           Autocomplete<PlantPreset>(
@@ -1512,9 +1990,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 controller: textEditingController,
                                 focusNode: focusNode,
                                 decoration: _sheetInputDecoration(
-                                  label: '식물 종류 검색',
+                                  label: l10n.searchPlantType,
                                   icon: Icons.search_rounded,
-                                  hint: '식물 이름을 입력하면 바로 선택할 수 있어요',
+                                  hint: l10n.searchPlantTypeHint,
                                 ),
                                 onChanged: (value) {
                                   final exact = _availablePresets.cast<PlantPreset?>().firstWhere(
@@ -1574,18 +2052,18 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                           TextField(
                             controller: _nameController,
                             decoration: _sheetInputDecoration(
-                              label: '나의 식물 이름',
+                              label: l10n.myPlantName,
                               icon: Icons.local_florist_rounded,
-                              hint: '예: 거실 몬스테라',
+                              hint: l10n.myPlantNameExample,
                             ),
                           ),
                           const SizedBox(height: 14),
                           TextField(
                             controller: _locationController,
                             decoration: _sheetInputDecoration(
-                              label: '위치',
+                              label: l10n.location,
                               icon: Icons.place_rounded,
-                              hint: '예: 거실 창가',
+                              hint: l10n.locationExample,
                             ),
                           ),
                         ],
@@ -1594,8 +2072,8 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                     const SizedBox(height: 16),
                     _buildSectionCard(
                       icon: Icons.schedule_rounded,
-                      title: '관리 루틴',
-                      subtitle: '물주기 간격과 마지막 물준 날짜를 깔끔하게 기록해둘 수 있어요.',
+                      title: l10n.careRoutine,
+                      subtitle: l10n.careRoutineHint,
                       accent: const Color(0xFFFFA94D),
                       child: Column(
                         children: [
@@ -1603,10 +2081,10 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                             controller: _cycleController,
                             keyboardType: TextInputType.number,
                             decoration: _sheetInputDecoration(
-                              label: '물주기 주기',
+                              label: l10n.wateringCycle,
                               icon: Icons.water_drop_rounded,
-                              hint: '숫자만 입력',
-                            ).copyWith(suffixText: '일'),
+                              hint: l10n.enterNumbersOnly,
+                            ).copyWith(suffixText: l10n.days),
                           ),
                           const SizedBox(height: 14),
                           InkWell(
@@ -1647,8 +2125,8 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        const Text(
-                                          '마지막 물준 날짜',
+                                        Text(
+                                          l10n.lastWateredDate,
                                           style: TextStyle(color: Color(0xFF66756C), fontWeight: FontWeight.w700),
                                         ),
                                         const SizedBox(height: 4),
@@ -1670,24 +2148,24 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                     const SizedBox(height: 16),
                     _buildSectionCard(
                       icon: Icons.notes_rounded,
-                      title: '메모',
-                      subtitle: '기억해두고 싶은 상태나 관리 포인트를 남겨보세요.',
+                      title: l10n.memo,
+                      subtitle: l10n.memoHintTitle,
                       accent: const Color(0xFF6C8CF6),
                       child: TextField(
                         controller: _memoController,
                         maxLines: 5,
                         decoration: _sheetInputDecoration(
-                          label: '식물 메모',
+                          label: l10n.memo,
                           icon: Icons.edit_note_rounded,
-                          hint: '예: 새 잎이 올라오는 중, 과습 주의',
+                          hint: l10n.memoExample,
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
                     _buildSectionCard(
                       icon: Icons.photo_library_rounded,
-                      title: '식물 사진',
-                      subtitle: '대표 사진을 맨 앞으로 두고 순서도 직접 바꿀 수 있어요.',
+                      title: l10n.plantPhoto,
+                      subtitle: l10n.plantPhotoHint,
                       accent: const Color(0xFF5B8DEF),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1704,7 +2182,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                               ),
                               icon: const Icon(Icons.add_photo_alternate_outlined),
-                              label: const Text('사진 선택'),
+                              label: Text(l10n.selectPhoto),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -1717,9 +2195,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                 borderRadius: BorderRadius.circular(22),
                                 border: Border.all(color: const Color(0xFFE3ECE6)),
                               ),
-                              child: const Text(
-                                '등록된 사진이 없습니다. 여러 장을 선택해서 대표 사진 순서까지 정리할 수 있어요.',
-                                style: TextStyle(color: Colors.black54, height: 1.4),
+                              child: Text(
+                                l10n.noRegisteredPhotos,
+                                style: const TextStyle(color: Colors.black54, height: 1.4),
                               ),
                             )
                           else
@@ -1779,9 +2257,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                                                 color: Colors.white.withValues(alpha: 0.92),
                                                 borderRadius: BorderRadius.circular(999),
                                               ),
-                                              child: const Text(
-                                                '대표',
-                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                                              child: Text(
+                                                l10n.representativePhoto,
+                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
                                               ),
                                             ),
                                           ),
@@ -1814,8 +2292,8 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                           const SizedBox(height: 12),
                           Text(
                             _photoAssetIds.length > 1
-                                ? '사진을 길게 눌러 드래그하면 순서를 바꿀 수 있어요. 첫 번째 사진이 대표로 보여집니다.'
-                                : '햇빛 추천은 ${_selectedPreset.sunlight} 환경이에요.',
+                                ? l10n.photoReorderHint
+                                : '${l10n.sunlight}: ${_selectedPreset.sunlight}',
                             style: const TextStyle(color: Colors.black54, height: 1.4),
                           ),
                         ],
@@ -1847,7 +2325,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                       id: widget.existing?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
                       name: _nameController.text.trim().isEmpty ? _selectedPreset.type : _nameController.text.trim(),
                       type: _selectedPreset.type,
-                      location: _locationController.text.trim().isEmpty ? '위치 미입력' : _locationController.text.trim(),
+                      location: _locationController.text.trim().isEmpty ? l10n.noLocationEnteredFallback() : _locationController.text.trim(),
                       wateringCycleDays: cycle,
                       lastWateredAt: _lastWateredAt,
                       memo: _memoController.text.trim().isEmpty ? _selectedPreset.tip : _memoController.text.trim(),
@@ -1863,7 +2341,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
                   ),
                   child: Text(
-                    isEditing ? '수정 내용 저장' : '식물 등록하기',
+                    isEditing ? l10n.saveChanges : l10n.registerPlant,
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -1886,6 +2364,7 @@ class PlantActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _statusColor(plant.status);
+    final l10n = context.l10n;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(18),
@@ -1922,7 +2401,7 @@ class PlantActionCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    plant.status == PlantStatus.overdue ? '${plant.daysUntilWatering.abs()}일 지났어요. 지금 물주기를 권장합니다.' : '오늘 물줄 차례입니다. 체크 후 다음 일정이 자동 계산됩니다.',
+                    plant.status == PlantStatus.overdue ? l10n.overdueRecommendation(plant.daysUntilWatering.abs()) : l10n.todayWateringTurn,
                   ),
                 ),
               ],
@@ -1931,9 +2410,9 @@ class PlantActionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(child: OutlinedButton(onPressed: onTap, child: const Text('상세 / 메모'))),
+              Expanded(child: OutlinedButton(onPressed: onTap, child: Text(l10n.detailMemo))),
               const SizedBox(width: 10),
-              Expanded(child: FilledButton(onPressed: onMarkWatered, child: const Text('물 줬어요'))),
+              Expanded(child: FilledButton(onPressed: onMarkWatered, child: Text(l10n.markWatered))),
             ],
           ),
         ],
@@ -1991,6 +2470,7 @@ class _PlantPresetOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -2013,7 +2493,7 @@ class _PlantPresetOptionTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${preset.defaultWateringCycleDays}일 주기 · ${preset.sunlight}',
+                  '${l10n.cycleDaysLabel(preset.defaultWateringCycleDays)} · ${preset.sunlight}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.black54, fontSize: 12),
@@ -2041,6 +2521,7 @@ class _SelectedPlantPresetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -2063,7 +2544,7 @@ class _SelectedPlantPresetCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${preset.defaultWateringCycleDays}일 기본 주기 · ${preset.sunlight}',
+                  '${l10n.defaultCycleDaysLabel(preset.defaultWateringCycleDays)} · ${preset.sunlight}',
                   style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
                 const SizedBox(height: 4),
@@ -2090,6 +2571,7 @@ class CompactPlantCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
@@ -2111,7 +2593,7 @@ class CompactPlantCard extends StatelessWidget {
                 children: [
                   Text(plant.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  Text('${plant.daysUntilWatering}일 후 · ${plant.location}'),
+                  Text(l10n.afterDaysLabel(plant.daysUntilWatering, plant.location)),
                 ],
               ),
             ),
@@ -2124,14 +2606,33 @@ class CompactPlantCard extends StatelessWidget {
 }
 
 class PlantListCard extends StatelessWidget {
-  const PlantListCard({super.key, required this.plant, required this.onTap});
+  const PlantListCard({
+    super.key,
+    required this.plant,
+    required this.onTap,
+    this.presetImageUrl,
+  });
 
   final PlantItem plant;
   final VoidCallback onTap;
+  final String? presetImageUrl;
 
   @override
   Widget build(BuildContext context) {
     final color = _statusColor(plant.status);
+    final l10n = context.l10n;
+    final statusGlow = switch (plant.status) {
+      PlantStatus.overdue => color.withValues(alpha: 0.18),
+      PlantStatus.today => color.withValues(alpha: 0.14),
+      PlantStatus.soon => color.withValues(alpha: 0.10),
+      PlantStatus.healthy => const Color(0x11000000),
+    };
+    final statusBanner = switch (plant.status) {
+      PlantStatus.overdue => const LinearGradient(colors: [Color(0xFFFFE2E0), Color(0xFFFFF5F4)]),
+      PlantStatus.today => const LinearGradient(colors: [Color(0xFFFFF0D7), Color(0xFFFFF8EC)]),
+      PlantStatus.soon => const LinearGradient(colors: [Color(0xFFEAF3FF), Color(0xFFF6FAFF)]),
+      PlantStatus.healthy => const LinearGradient(colors: [Color(0xFFEAF6EE), Color(0xFFF6FBF8)]),
+    };
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(22),
@@ -2140,134 +2641,140 @@ class PlantListCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
-          boxShadow: const [BoxShadow(color: Color(0x11000000), blurRadius: 16, offset: Offset(0, 8))],
+          border: Border.all(color: color.withValues(alpha: 0.18)),
+          boxShadow: [BoxShadow(color: statusGlow, blurRadius: 20, offset: const Offset(0, 10))],
         ),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                width: 126,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (plant.photoAssetIds.isNotEmpty)
-                      PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 126, height: 220, borderRadius: 0)
-                    else
-                      Container(
-                        color: color.withValues(alpha: 0.14),
-                        child: Icon(Icons.local_florist_rounded, color: color, size: 42),
-                      ),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black.withValues(alpha: 0.22)],
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+              decoration: BoxDecoration(gradient: statusBanner),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _statusDescription(plant.status),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  StatusChip(status: plant.status),
+                ],
+              ),
+            ),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: 126,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (plant.photoAssetIds.isNotEmpty)
+                          PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 126, height: 220, borderRadius: 0)
+                        else if (presetImageUrl != null && presetImageUrl!.isNotEmpty)
+                          Image.network(
+                            presetImageUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Container(
+                              color: color.withValues(alpha: 0.14),
+                              child: Icon(Icons.local_florist_rounded, color: color, size: 42),
+                            ),
+                          )
+                        else
+                          Container(
+                            color: color.withValues(alpha: 0.14),
+                            child: Icon(Icons.local_florist_rounded, color: color, size: 42),
+                          ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Colors.black.withValues(alpha: 0.22)],
+                            ),
+                          ),
                         ),
+                        if (plant.photoAssetIds.length > 1)
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.42),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '+${plant.photoAssetIds.length - 1}',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            plant.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${plant.type} · ${plant.location}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.black54),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              _InfoPill(
+                                icon: Icons.calendar_month_rounded,
+                                label: l10n.nextDateLabel(plant.nextWateringAt),
+                                tint: const Color(0xFFEAF5EE),
+                              ),
+                              _InfoPill(
+                                icon: Icons.water_drop_rounded,
+                                label: l10n.cycleDaysLabel(plant.wateringCycleDays),
+                                tint: const Color(0xFFFFF0D9),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            plant.memo,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.black54, height: 1.45),
+                          ),
+                        ],
                       ),
                     ),
-                    if (plant.photoAssetIds.length > 1)
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.42),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '+${plant.photoAssetIds.length - 1}',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  plant.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${plant.type} · ${plant.location}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Colors.black54),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          StatusChip(status: plant.status),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _InfoPill(
-                            icon: Icons.calendar_month_rounded,
-                            label: '다음 ${_dateLabel(plant.nextWateringAt)}',
-                            tint: const Color(0xFFEAF5EE),
-                          ),
-                          _InfoPill(
-                            icon: Icons.water_drop_rounded,
-                            label: '${plant.wateringCycleDays}일 주기',
-                            tint: const Color(0xFFFFF0D9),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        plant.memo,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.black54, height: 1.45),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Container(
-                            width: 9,
-                            height: 9,
-                            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _statusDescription(plant.status),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: color, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ),
-                ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -2353,8 +2860,8 @@ class StatCard extends StatelessWidget {
   }
 }
 
-class _HighlightMetric extends StatelessWidget {
-  const _HighlightMetric({
+class _HomeMiniStat extends StatelessWidget {
+  const _HomeMiniStat({
     required this.label,
     required this.value,
   });
@@ -2367,23 +2874,24 @@ class _HighlightMetric extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EDE8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(label, style: const TextStyle(color: Color(0xFF66756C), fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+          Text(value, style: const TextStyle(color: Color(0xFF111A16), fontSize: 22, fontWeight: FontWeight.w800)),
         ],
       ),
     );
   }
 }
 
-class _GlassSummaryCard extends StatelessWidget {
-  const _GlassSummaryCard({
+class _HomeOverviewCard extends StatelessWidget {
+  const _HomeOverviewCard({
     required this.title,
     required this.subtitle,
     required this.value,
@@ -2398,36 +2906,37 @@ class _GlassSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0C000000),
-            blurRadius: 20,
-            offset: Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: const Color(0xFFE4ECE6)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(Icons.auto_awesome_rounded, color: accent, size: 18),
+            child: Icon(Icons.circle, color: accent, size: 14),
           ),
-          const SizedBox(height: 14),
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 6),
-          Text(subtitle, style: const TextStyle(color: Colors.black54, height: 1.4)),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: Color(0xFF66756C), fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text(subtitle, style: const TextStyle(color: Colors.black54, height: 1.4)),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -2608,40 +3117,33 @@ Color _statusColor(PlantStatus status) {
 }
 
 String _statusText(PlantStatus status) {
+  final l10n = AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale);
   switch (status) {
     case PlantStatus.healthy:
-      return '안정';
+      return l10n.healthy;
     case PlantStatus.soon:
-      return '곧 필요';
+      return l10n.soon;
     case PlantStatus.today:
-      return '오늘 물주기';
+      return l10n.todayWatering;
     case PlantStatus.overdue:
-      return '오래 방치';
+      return l10n.overdue;
   }
 }
 
 String _statusDescription(PlantStatus status) {
+  final l10n = AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale);
   switch (status) {
     case PlantStatus.healthy:
-      return '루틴이 안정적이에요';
+      return l10n.healthyDesc;
     case PlantStatus.soon:
-      return '곧 물주기 타이밍';
+      return l10n.soonDesc;
     case PlantStatus.today:
-      return '오늘 챙기면 좋아요';
+      return l10n.todayDesc;
     case PlantStatus.overdue:
-      return '가장 먼저 확인해주세요';
+      return l10n.overdueDesc;
   }
 }
 
 String _dateLabel(DateTime date) {
-  return '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
-}
-
-String _weekdayKor(int weekday) {
-  const labels = ['월', '화', '수', '목', '금', '토', '일'];
-  return labels[weekday - 1];
-}
-
-String _monthLabel(DateTime date) {
-  return '${date.year}년 ${date.month}월';
+  return AppLocalizations.forLocale(WidgetsBinding.instance.platformDispatcher.locale).dateLabel(date);
 }

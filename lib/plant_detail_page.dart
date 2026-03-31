@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_localizations.dart';
 import 'plant_models.dart';
 import 'plant_photo_widgets.dart';
 
@@ -17,6 +18,7 @@ class PlantDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: const Color(0xFFF6FBF7),
       appBar: AppBar(
@@ -26,7 +28,7 @@ class PlantDetailPage extends StatelessWidget {
           IconButton(
             onPressed: onEdit,
             icon: const Icon(Icons.edit_outlined),
-            tooltip: '수정',
+            tooltip: l10n.edit,
           ),
         ],
       ),
@@ -71,8 +73,8 @@ class PlantDetailPage extends StatelessWidget {
                                 color: Colors.black87,
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: const Text(
-                                '대표 사진',
+                              child: Text(
+                                l10n.representativePhoto,
                                 style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -90,29 +92,29 @@ class PlantDetailPage extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
               ),
-              child: const Center(
-                child: Text('등록된 식물 사진이 없습니다.', style: TextStyle(color: Colors.black54)),
+              child: Center(
+                child: Text(l10n.noPlantPhoto, style: const TextStyle(color: Colors.black54)),
               ),
             ),
           const SizedBox(height: 20),
           _DetailCard(
-            title: '기본 정보',
+            title: l10n.basicInfo,
             child: Column(
               children: [
-                _DetailRow(label: '식물 종류', value: plant.type),
-                _DetailRow(label: '위치', value: plant.location),
-                _DetailRow(label: '햇빛 추천', value: plant.sunlight),
-                _DetailRow(label: '물주기 주기', value: '${plant.wateringCycleDays}일'),
-                _DetailRow(label: '마지막 물준 날짜', value: _dateLabel(plant.lastWateredAt)),
-                _DetailRow(label: '다음 물주기', value: _dateLabel(plant.nextWateringAt), isLast: true),
+                _DetailRow(label: l10n.plantType, value: plant.type),
+                _DetailRow(label: l10n.location, value: plant.location),
+                _DetailRow(label: l10n.sunlight, value: plant.sunlight),
+                _DetailRow(label: l10n.wateringCycle, value: l10n.cycleDays(plant.wateringCycleDays)),
+                _DetailRow(label: l10n.lastWateredDate, value: l10n.dateLabel(plant.lastWateredAt)),
+                _DetailRow(label: l10n.nextWatering, value: l10n.dateLabel(plant.nextWateringAt), isLast: true),
               ],
             ),
           ),
           const SizedBox(height: 16),
           _DetailCard(
-            title: '메모',
+            title: l10n.memo,
             child: Text(
-              plant.memo.isEmpty ? '메모가 없습니다.' : plant.memo,
+              plant.memo.isEmpty ? l10n.noMemo : plant.memo,
               style: const TextStyle(height: 1.6, color: Colors.black87),
             ),
           ),
@@ -120,7 +122,7 @@ class PlantDetailPage extends StatelessWidget {
           FilledButton.icon(
             onPressed: onWatered,
             icon: const Icon(Icons.water_drop_outlined),
-            label: const Text('물 줬어요'),
+            label: Text(l10n.markWatered),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(54),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -144,13 +146,14 @@ class PlantPhotoGalleryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final controller = PageController(initialPage: initialIndex);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text('사진 ${initialIndex + 1}/${assetIds.length}'),
+        title: Text(l10n.photoIndexLabel(initialIndex + 1, assetIds.length)),
       ),
       body: PageView.builder(
         controller: controller,
@@ -223,8 +226,4 @@ class _DetailRow extends StatelessWidget {
       ),
     );
   }
-}
-
-String _dateLabel(DateTime date) {
-  return '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
 }

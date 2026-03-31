@@ -63,13 +63,15 @@ class AdService {
     }
   }
 
-  static Future<BannerAd?> loadBanner() async {
+  static Future<BannerAd?> loadBanner(int screenWidth) async {
     final s = _settings;
     if (s == null || s.bannerAdUnitId.isEmpty) return null;
+    final adSize = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(screenWidth);
+    if (adSize == null) return null;
 
     final completer = Completer<BannerAd?>();
     final banner = BannerAd(
-      size: AdSize.banner,
+      size: adSize,
       adUnitId: s.bannerAdUnitId,
       listener: BannerAdListener(
         onAdLoaded: (ad) => completer.complete(ad as BannerAd),

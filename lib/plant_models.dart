@@ -2,6 +2,8 @@ import 'dart:convert';
 
 enum PlantStatus { healthy, soon, today, overdue }
 
+const String _plantReminderBaseUrl = 'https://app-master.officialsite.kr';
+
 class PlantItem {
   PlantItem({
     required this.id,
@@ -115,13 +117,18 @@ class PlantPreset {
   final bool isActive;
 
   factory PlantPreset.fromJson(Map<String, dynamic> json) {
+    final rawImageUrl = (json['image_url'] ?? '').toString().trim();
     return PlantPreset(
       id: json['id'] as int?,
       type: (json['type_name'] ?? json['type'] ?? '').toString(),
       defaultWateringCycleDays: (json['watering_cycle_days'] ?? json['defaultWateringCycleDays'] ?? 7) as int,
       sunlight: (json['sunlight'] ?? '').toString(),
       tip: (json['tip'] ?? '').toString(),
-      imageUrl: (json['image_url'] ?? '').toString().trim().isEmpty ? null : (json['image_url'] as String),
+      imageUrl: rawImageUrl.isEmpty
+          ? null
+          : (rawImageUrl.startsWith('http')
+              ? rawImageUrl
+              : '$_plantReminderBaseUrl${rawImageUrl.startsWith('/') ? '' : '/'}$rawImageUrl'),
       sortOrder: (json['sort_order'] ?? 0) as int,
       isActive: json['is_active'] == null ? true : json['is_active'] == true || json['is_active'] == 1,
     );

@@ -6,14 +6,36 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class AppAuthUser {
   const AppAuthUser({
+    required this.id,
     required this.displayName,
     required this.email,
     required this.provider,
+    this.profileImageUrl,
   });
 
+  final String id;
   final String displayName;
   final String email;
   final String provider;
+  final String? profileImageUrl;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'email': email,
+        'provider': provider,
+        'profileImageUrl': profileImageUrl,
+      };
+
+  factory AppAuthUser.fromJson(Map<String, dynamic> json) => AppAuthUser(
+        id: (json['id'] ?? '').toString(),
+        displayName: (json['displayName'] ?? '').toString(),
+        email: (json['email'] ?? '').toString(),
+        provider: (json['provider'] ?? '').toString(),
+        profileImageUrl: (json['profileImageUrl'] ?? '').toString().trim().isEmpty
+            ? null
+            : json['profileImageUrl'].toString(),
+      );
 }
 
 class AuthService {
@@ -39,11 +61,13 @@ class AuthService {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
       return AppAuthUser(
+        id: googleUser.id,
         displayName: googleUser.displayName?.trim().isNotEmpty == true
             ? googleUser.displayName!
             : 'Google User',
         email: googleUser.email,
         provider: 'google',
+        profileImageUrl: googleUser.photoUrl,
       );
     } catch (error) {
       debugPrint('구글 로그인 실패: $error');
@@ -66,6 +90,7 @@ class AuthService {
       ].where((part) => part != null && part.trim().isNotEmpty).join(' ');
 
       return AppAuthUser(
+        id: credential.userIdentifier ?? credential.identityToken ?? credential.email ?? 'apple-user',
         displayName: fullName.isNotEmpty ? fullName : 'Apple User',
         email: credential.email ?? 'apple-user@private.local',
         provider: 'apple',

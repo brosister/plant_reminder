@@ -11,6 +11,18 @@ class AppSettings {
   final int notificationHour;
   final int notificationMinute;
 
+  Map<String, dynamic> toJson() => {
+        'notificationsEnabled': notificationsEnabled,
+        'notificationHour': notificationHour,
+        'notificationMinute': notificationMinute,
+      };
+
+  factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
+        notificationsEnabled: json['notificationsEnabled'] == true,
+        notificationHour: (json['notificationHour'] ?? 9) as int,
+        notificationMinute: (json['notificationMinute'] ?? 0) as int,
+      );
+
   AppSettings copyWith({
     bool? notificationsEnabled,
     int? notificationHour,

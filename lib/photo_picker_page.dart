@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 
+import 'app_localizations.dart';
+
 class PhotoPickerPage extends StatefulWidget {
   const PhotoPickerPage({super.key, required this.initialSelectedIds});
 
@@ -35,7 +37,11 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
     super.initState();
     _selectedIds.value = {...widget.initialSelectedIds};
     _scrollController.addListener(_handleScroll);
-    _loadAssets();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadAssets();
+      }
+    });
   }
 
   @override
@@ -46,113 +52,133 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
   }
 
   Future<void> _loadAssets({bool resetAlbum = true}) async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    try {
+      final l10n = AppLocalizations.of(context);
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
 
-    final permission = await PhotoManager.requestPermissionExtend();
-    if (!mounted) return;
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!mounted) return;
 
-    _permissionState = permission;
-    if (!permission.hasAccess) {
+      _permissionState = permission;
+      if (!permission.hasAccess) {
+        setState(() {
+          _isLoading = false;
+          _error = _permissionMessage(permission);
+        });
+        return;
+      }
+
+      final albums = await PhotoManager.getAssetPathList(
+        type: RequestType.image,
+        onlyAll: false,
+        filterOption: FilterOptionGroup(
+          imageOption: const FilterOption(sizeConstraint: SizeConstraint(ignoreSize: true)),
+        ),
+      );
+
+      if (!mounted) return;
+      if (albums.isEmpty) {
+        setState(() {
+          _albums.clear();
+          _assets.clear();
+          _selectedAlbum = null;
+          _isLoading = false;
+          _error = l10n.noPhotosToShow;
+        });
+        return;
+      }
+
+      final previousAlbum = _selectedAlbum;
+      final nextAlbum = !resetAlbum && previousAlbum != null
+          ? albums.cast<AssetPathEntity?>().firstWhere(
+              (album) => album?.id == previousAlbum.id,
+              orElse: () => albums.first,
+            )
+          : albums.first;
+
+      setState(() {
+        _albums
+          ..clear()
+          ..addAll(albums);
+        _selectedAlbum = nextAlbum;
+      });
+
+      await _loadAlbumAssets(reset: true);
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _error = _permissionMessage(permission);
+        _isLoadingMore = false;
+        _error = AppLocalizations.of(context).failedToLoadAlbum;
       });
-      return;
     }
-
-    final albums = await PhotoManager.getAssetPathList(
-      type: RequestType.image,
-      onlyAll: false,
-      filterOption: FilterOptionGroup(
-        imageOption: const FilterOption(sizeConstraint: SizeConstraint(ignoreSize: true)),
-      ),
-    );
-
-    if (!mounted) return;
-    if (albums.isEmpty) {
-      setState(() {
-        _albums.clear();
-        _assets.clear();
-        _selectedAlbum = null;
-        _isLoading = false;
-        _error = '표시할 사진이 없습니다.';
-      });
-      return;
-    }
-
-    final previousAlbum = _selectedAlbum;
-    final nextAlbum = !resetAlbum && previousAlbum != null
-        ? albums.cast<AssetPathEntity?>().firstWhere(
-            (album) => album?.id == previousAlbum.id,
-            orElse: () => albums.first,
-          )
-        : albums.first;
-
-    setState(() {
-      _albums
-        ..clear()
-        ..addAll(albums);
-      _selectedAlbum = nextAlbum;
-    });
-
-    await _loadAlbumAssets(reset: true);
   }
 
   Future<void> _loadAlbumAssets({required bool reset}) async {
-    final album = _selectedAlbum;
-    if (album == null) {
-      setState(() {
-        _isLoading = false;
-        _isLoadingMore = false;
-        _error = '앨범을 불러오지 못했습니다.';
-      });
-      return;
-    }
+    try {
+      final l10n = AppLocalizations.of(context);
+      final album = _selectedAlbum;
+      if (album == null) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingMore = false;
+          _error = AppLocalizations.of(context).failedToLoadAlbum;
+        });
+        return;
+      }
 
-    if (reset) {
-      _currentPage = 0;
-      _hasMore = true;
-      _thumbnailFutures.clear();
-      setState(() {
-        _assets.clear();
-      });
-    } else {
-      if (_isLoadingMore || !_hasMore) return;
-      setState(() {
-        _isLoadingMore = true;
-      });
-    }
-
-    final page = _currentPage;
-    final assets = await album.getAssetListPaged(page: page, size: _pageSize);
-    if (!mounted) return;
-
-    for (final asset in assets) {
-      _thumbnailFutures.putIfAbsent(
-        asset.id,
-        () => asset.thumbnailDataWithSize(const ThumbnailSize(400, 400)),
-      );
-    }
-
-    setState(() {
       if (reset) {
-        _assets
-          ..clear()
-          ..addAll(assets);
-        _isLoading = false;
+        _currentPage = 0;
+        _hasMore = true;
+        _thumbnailFutures.clear();
+        setState(() {
+          _assets.clear();
+        });
       } else {
-        _assets.addAll(assets);
+        if (_isLoadingMore || !_hasMore) return;
+        setState(() {
+          _isLoadingMore = true;
+        });
+      }
+
+      final page = _currentPage;
+      final assets = await album.getAssetListPaged(page: page, size: _pageSize);
+      if (!mounted) return;
+
+      for (final asset in assets) {
+        _thumbnailFutures.putIfAbsent(
+          asset.id,
+          () => asset.thumbnailDataWithSize(const ThumbnailSize(400, 400)),
+        );
+      }
+
+      setState(() {
+        if (reset) {
+          _assets
+            ..clear()
+            ..addAll(assets);
+          _isLoading = false;
+        } else {
+          _assets.addAll(assets);
+          _isLoadingMore = false;
+        }
+        _error = _assets.isEmpty ? l10n.noPhotosToShow : null;
+        _hasMore = assets.length == _pageSize;
+        if (assets.isNotEmpty) {
+          _currentPage += 1;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
         _isLoadingMore = false;
-      }
-      _error = _assets.isEmpty ? '표시할 사진이 없습니다.' : null;
-      _hasMore = assets.length == _pageSize;
-      if (assets.isNotEmpty) {
-        _currentPage += 1;
-      }
-    });
+        _error = AppLocalizations.of(context).failedToLoadAlbum;
+      });
+    }
   }
 
   void _handleScroll() {
@@ -166,17 +192,18 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
   }
 
   String _permissionMessage(PermissionState permission) {
+    final l10n = AppLocalizations.of(context);
     switch (permission) {
       case PermissionState.denied:
-        return '사진 접근 권한이 거부되어 사진을 불러올 수 없습니다. 설정에서 사진 권한을 허용해주세요.';
+        return l10n.photoPermissionDenied;
       case PermissionState.restricted:
-        return '이 기기에서는 사진 접근이 제한되어 있습니다. 기기 설정을 확인해주세요.';
+        return l10n.photoPermissionRestricted;
       case PermissionState.limited:
-        return '일부 사진만 접근 가능한 상태입니다. 필요한 사진이 보이지 않으면 접근 범위를 넓혀주세요.';
+        return l10n.photoPermissionLimited;
       case PermissionState.notDetermined:
-        return '사진 접근 권한이 필요합니다.';
+        return l10n.photoPermissionRequired;
       case PermissionState.authorized:
-        return '사진 접근 권한이 필요합니다.';
+        return l10n.photoPermissionRequired;
     }
   }
 
@@ -211,19 +238,20 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final bottomSafeArea = MediaQuery.of(context).viewPadding.bottom;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('식물 사진 선택'),
+        title: Text(l10n.selectPlantPhotos),
         actions: [
           if (_permissionState == PermissionState.limited)
             IconButton(
               onPressed: _manageLimitedAccess,
               icon: const Icon(Icons.tune_outlined),
-              tooltip: '접근 사진 관리',
+              tooltip: l10n.manageAccessiblePhotos,
             ),
           ValueListenableBuilder<Set<String>>(
             valueListenable: _selectedIds,
@@ -231,7 +259,7 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
               return TextButton(
                 onPressed: () => Navigator.of(context).pop(selectedIds.toList()),
                 child: Text(
-                  '완료 (${selectedIds.length})',
+                  '${l10n.done} (${selectedIds.length})',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               );
@@ -244,6 +272,7 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
   }
 
   Widget _buildBody(double bottomSafeArea) {
+    final l10n = context.l10n;
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -259,18 +288,18 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
               if (_permissionState == PermissionState.denied || _permissionState == PermissionState.restricted)
                 FilledButton(
                   onPressed: _openPermissionSettings,
-                  child: const Text('설정 열기'),
+                  child: Text(l10n.openSettings),
                 ),
               if (_permissionState == PermissionState.limited) ...[
                 FilledButton(
                   onPressed: _manageLimitedAccess,
-                  child: Text(Platform.isIOS ? '선택한 사진 관리' : '접근 범위 다시 확인'),
+                  child: Text(Platform.isIOS ? l10n.manageSelectedPhotos : l10n.reviewAccessScope),
                 ),
                 const SizedBox(height: 12),
               ],
               FilledButton(
                 onPressed: _loadAssets,
-                child: const Text('다시 시도'),
+                child: Text(l10n.tryAgain),
               ),
             ],
           ),
@@ -289,8 +318,8 @@ class _PhotoPickerPageState extends State<PhotoPickerPage> {
             children: [
               Text(
                 _permissionState == PermissionState.limited
-                    ? '현재 일부 사진만 접근 가능합니다. 필요한 사진이 없다면 오른쪽 상단에서 접근 범위를 조정하세요.'
-                    : '여러 장을 선택할 수 있습니다. 식물 대표 사진과 기록 사진으로 활용됩니다.',
+                    ? l10n.limitedAccessBanner
+                    : l10n.multiPhotoHint,
                 style: const TextStyle(color: Colors.white70, height: 1.4),
               ),
               const SizedBox(height: 12),
