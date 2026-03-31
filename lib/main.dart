@@ -5,7 +5,9 @@ import 'app_settings_service.dart';
 import 'auth_service.dart';
 import 'firebase_service.dart';
 import 'notification_service.dart';
+import 'photo_picker_page.dart';
 import 'plant_models.dart';
+import 'plant_photo_widgets.dart';
 import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
 
@@ -79,6 +81,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       lastWateredAt: DateTime.now().subtract(const Duration(days: 4)),
       memo: '잎 상태 자주 보기. 햇빛 충분히 받게 두기.',
       sunlight: '햇빛 필요',
+      photoAssetIds: const [],
     ),
   ];
 
@@ -578,6 +581,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   late final TextEditingController _cycleController;
   late PlantPreset _selectedPreset;
   late DateTime _lastWateredAt;
+  late List<String> _photoAssetIds;
 
   @override
   void initState() {
@@ -592,6 +596,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     _memoController = TextEditingController(text: current?.memo ?? _selectedPreset.tip);
     _cycleController = TextEditingController(text: '${current?.wateringCycleDays ?? _selectedPreset.defaultWateringCycleDays}');
     _lastWateredAt = current?.lastWateredAt ?? DateTime.now();
+    _photoAssetIds = List<String>.from(current?.photoAssetIds ?? const []);
   }
 
   @override
@@ -601,6 +606,19 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     _memoController.dispose();
     _cycleController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openPhotoPicker() async {
+    final result = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(
+        builder: (_) => PhotoPickerPage(initialSelectedIds: _photoAssetIds),
+      ),
+    );
+    if (result != null) {
+      setState(() {
+        _photoAssetIds = result;
+      });
+    }
   }
 
   @override
@@ -615,7 +633,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
           children: [
             Text(widget.existing == null ? '식물 등록' : '식물 수정', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('나의 식물을 등록하고 물주기 주기와 메모를 설정하세요.', style: TextStyle(color: Colors.black54)),
+            const Text('나의 식물을 등록하고 물주기 주기, 메모, 사진을 관리하세요.', style: TextStyle(color: Colors.black54)),
             const SizedBox(height: 20),
             DropdownButtonFormField<PlantPreset>(
               initialValue: _selectedPreset,
@@ -660,6 +678,66 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
             ),
             const SizedBox(height: 14),
             TextField(controller: _memoController, maxLines: 4, decoration: _inputDecoration('식물 메모')),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('식물 사진', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                TextButton.icon(
+                  onPressed: _openPhotoPicker,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: const Text('사진 선택'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_photoAssetIds.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Text('등록된 사진이 없습니다. 여러 장을 선택할 수 있습니다.', style: TextStyle(color: Colors.black54)),
+              )
+            else
+              SizedBox(
+                height: 90,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _photoAssetIds.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final assetId = _photoAssetIds[index];
+                    return Stack(
+                      children: [
+                        PlantPhotoThumb(assetId: assetId, width: 90, height: 90, borderRadius: 18),
+                        Positioned(
+                          top: 6,
+                          right: 6,
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _photoAssetIds.removeAt(index);
+                              });
+                            },
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: const BoxDecoration(
+                                color: Colors.black87,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close, color: Colors.white, size: 16),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             const SizedBox(height: 10),
             Text('햇빛 추천: ${_selectedPreset.sunlight}', style: const TextStyle(color: Colors.black54)),
             const SizedBox(height: 24),
@@ -675,6 +753,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                   lastWateredAt: _lastWateredAt,
                   memo: _memoController.text.trim().isEmpty ? _selectedPreset.tip : _memoController.text.trim(),
                   sunlight: _selectedPreset.sunlight,
+                  photoAssetIds: List<String>.from(_photoAssetIds),
                 );
                 Navigator.of(context).pop(plant);
               },
@@ -710,6 +789,10 @@ class PlantActionCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (plant.photoAssetIds.isNotEmpty) ...[
+                PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 56, height: 56, borderRadius: 16),
+                const SizedBox(width: 12),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,18 +899,33 @@ class PlantListCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (plant.photoAssetIds.isNotEmpty) ...[
+                  PlantPhotoThumb(assetId: plant.photoAssetIds.first, width: 76, height: 76, borderRadius: 18),
+                  const SizedBox(width: 14),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(plant.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(plant.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ),
+                          StatusChip(status: plant.status),
+                        ],
+                      ),
                       const SizedBox(height: 4),
                       Text('${plant.type} · ${plant.location}'),
+                      if (plant.photoAssetIds.length > 1) ...[
+                        const SizedBox(height: 6),
+                        Text('사진 ${plant.photoAssetIds.length}장', style: const TextStyle(color: Colors.black54)),
+                      ],
                     ],
                   ),
                 ),
-                StatusChip(status: plant.status),
               ],
             ),
             const SizedBox(height: 14),

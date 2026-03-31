@@ -12,6 +12,7 @@ class PlantItem {
     required this.lastWateredAt,
     required this.memo,
     required this.sunlight,
+    this.photoAssetIds = const [],
   });
 
   final String id;
@@ -22,6 +23,7 @@ class PlantItem {
   DateTime lastWateredAt;
   String memo;
   String sunlight;
+  List<String> photoAssetIds;
 
   DateTime get nextWateringAt => lastWateredAt.add(Duration(days: wateringCycleDays));
 
@@ -50,6 +52,7 @@ class PlantItem {
       lastWateredAt: lastWateredAt,
       memo: memo,
       sunlight: sunlight,
+      photoAssetIds: List<String>.from(photoAssetIds),
     );
   }
 
@@ -62,6 +65,7 @@ class PlantItem {
         'lastWateredAt': lastWateredAt.toIso8601String(),
         'memo': memo,
         'sunlight': sunlight,
+        'photoAssetIds': photoAssetIds,
       };
 
   factory PlantItem.fromJson(Map<String, dynamic> json) => PlantItem(
@@ -73,13 +77,19 @@ class PlantItem {
         lastWateredAt: DateTime.parse(json['lastWateredAt'] as String),
         memo: json['memo'] as String,
         sunlight: json['sunlight'] as String,
+        photoAssetIds: (json['photoAssetIds'] as List<dynamic>? ?? const [])
+            .map((e) => e.toString())
+            .toList(),
       );
 
-  static String encodeList(List<PlantItem> items) => jsonEncode(items.map((e) => e.toJson()).toList());
+  static String encodeList(List<PlantItem> items) =>
+      jsonEncode(items.map((e) => e.toJson()).toList());
 
   static List<PlantItem> decodeList(String raw) {
     final decoded = jsonDecode(raw) as List<dynamic>;
-    return decoded.map((e) => PlantItem.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    return decoded
+        .map((e) => PlantItem.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
   }
 }
 
@@ -98,10 +108,40 @@ class PlantPreset {
 }
 
 const List<PlantPreset> kPlantPresets = [
-  PlantPreset(type: '몬스테라', defaultWateringCycleDays: 5, sunlight: '밝은 간접광', tip: '흙 표면이 마르면 물주기'),
-  PlantPreset(type: '스투키', defaultWateringCycleDays: 14, sunlight: '밝은 곳', tip: '과습 주의, 자주 주지 않기'),
-  PlantPreset(type: '포토스', defaultWateringCycleDays: 6, sunlight: '간접광', tip: '잎이 축 처지기 전에 확인'),
-  PlantPreset(type: '선인장', defaultWateringCycleDays: 21, sunlight: '직사광 가능', tip: '완전히 마른 뒤 물주기'),
-  PlantPreset(type: '허브', defaultWateringCycleDays: 3, sunlight: '햇빛 필요', tip: '자주 확인하고 너무 마르지 않게'),
-  PlantPreset(type: '고무나무', defaultWateringCycleDays: 7, sunlight: '밝은 간접광', tip: '통풍 좋은 곳에 두기'),
+  PlantPreset(
+    type: '몬스테라',
+    defaultWateringCycleDays: 5,
+    sunlight: '밝은 간접광',
+    tip: '흙 표면이 마르면 물주기',
+  ),
+  PlantPreset(
+    type: '스투키',
+    defaultWateringCycleDays: 14,
+    sunlight: '밝은 곳',
+    tip: '과습 주의, 자주 주지 않기',
+  ),
+  PlantPreset(
+    type: '포토스',
+    defaultWateringCycleDays: 6,
+    sunlight: '간접광',
+    tip: '잎이 축 처지기 전에 확인',
+  ),
+  PlantPreset(
+    type: '선인장',
+    defaultWateringCycleDays: 21,
+    sunlight: '직사광 가능',
+    tip: '완전히 마른 뒤 물주기',
+  ),
+  PlantPreset(
+    type: '허브',
+    defaultWateringCycleDays: 3,
+    sunlight: '햇빛 필요',
+    tip: '자주 확인하고 너무 마르지 않게',
+  ),
+  PlantPreset(
+    type: '고무나무',
+    defaultWateringCycleDays: 7,
+    sunlight: '밝은 간접광',
+    tip: '통풍 좋은 곳에 두기',
+  ),
 ];
