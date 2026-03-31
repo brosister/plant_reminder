@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'app_settings_service.dart';
 import 'auth_service.dart';
+import 'firebase_service.dart';
 import 'notification_service.dart';
 import 'plant_models.dart';
 import 'plant_storage_service.dart';
@@ -40,6 +42,11 @@ class _PlantRootPageState extends State<PlantRootPage> {
   AppAuthUser? _authUser;
   bool _isSigningIn = false;
   bool _isLoading = true;
+  AppSettings _settings = const AppSettings(
+    notificationsEnabled: true,
+    notificationHour: 9,
+    notificationMinute: 0,
+  );
 
   final List<PlantItem> _plants = [
     PlantItem(
@@ -81,14 +88,17 @@ class _PlantRootPageState extends State<PlantRootPage> {
   }
 
   Future<void> _bootstrap() async {
+    await FirebaseService.init();
     await NotificationService.init();
     final stored = await PlantStorageService.loadPlants();
+    final loadedSettings = await AppSettingsService.load();
     if (stored.isNotEmpty) {
       _plants
         ..clear()
         ..addAll(stored);
     }
-    await NotificationService.rescheduleForPlants(_plants);
+    _settings = loadedSettings;
+    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     if (!mounted) return;
     setState(() {
       _isLoading = false;
@@ -97,7 +107,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
 
   Future<void> _persistPlants() async {
     await PlantStorageService.savePlants(_plants);
-    await NotificationService.rescheduleForPlants(_plants);
+    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
   }
 
   void _markWatered(PlantItem plant) {
@@ -155,11 +165,21 @@ class _PlantRootPageState extends State<PlantRootPage> {
         return SettingsDialog(
           authUser: _authUser,
           isSigningIn: _isSigningIn,
+          settings: _settings,
           onSignInPressed: _handlePlatformSignIn,
           onSignOutPressed: _handleSignOut,
+          onSettingsChanged: _handleSettingsChanged,
         );
       },
     );
+  }
+
+  Future<void> _handleSettingsChanged(AppSettings settings) async {
+    setState(() {
+      _settings = settings;
+    });
+    await AppSettingsService.save(settings);
+    await NotificationService.rescheduleForPlants(_plants, settings: _settings);
   }
 
   Future<void> _handlePlatformSignIn() async {

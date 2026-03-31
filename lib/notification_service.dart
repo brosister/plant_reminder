@@ -2,6 +2,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'app_settings_service.dart';
 import 'plant_models.dart';
 
 class NotificationService {
@@ -31,17 +32,27 @@ class NotificationService {
     _initialized = true;
   }
 
-  static Future<void> rescheduleForPlants(List<PlantItem> plants) async {
+  static Future<void> rescheduleForPlants(
+    List<PlantItem> plants, {
+    required AppSettings settings,
+  }) async {
     await init();
     await _plugin.cancelAll();
 
+    if (!settings.notificationsEnabled) {
+      return;
+    }
+
     for (final plant in plants) {
-      await schedulePlantReminder(plant);
+      await schedulePlantReminder(plant, settings: settings);
     }
   }
 
-  static Future<void> schedulePlantReminder(PlantItem plant) async {
-    final scheduled = _nextReminderDateTime(plant);
+  static Future<void> schedulePlantReminder(
+    PlantItem plant, {
+    required AppSettings settings,
+  }) async {
+    final scheduled = _nextReminderDateTime(plant, settings: settings);
     final id = plant.id.hashCode & 0x7fffffff;
 
     await _plugin.zonedSchedule(
@@ -64,10 +75,20 @@ class NotificationService {
     );
   }
 
-  static tz.TZDateTime _nextReminderDateTime(PlantItem plant) {
+  static tz.TZDateTime _nextReminderDateTime(
+    PlantItem plant, {
+    required AppSettings settings,
+  }) {
     final next = plant.nextWateringAt;
     final local = tz.local;
-    final candidate = tz.TZDateTime(local, next.year, next.month, next.day, 9);
+    final candidate = tz.TZDateTime(
+      local,
+      next.year,
+      next.month,
+      next.day,
+      settings.notificationHour,
+      settings.notificationMinute,
+    );
     final now = tz.TZDateTime.now(local);
     if (candidate.isAfter(now)) return candidate;
     return now.add(const Duration(minutes: 1));
