@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
 import 'app_settings_service.dart';
 import 'auth_service.dart';
@@ -110,14 +111,17 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
   }
 
+  void _showToast(String message) {
+    Fluttertoast.cancel();
+    Fluttertoast.showToast(msg: message, gravity: ToastGravity.BOTTOM);
+  }
+
   void _markWatered(PlantItem plant) {
     setState(() {
       plant.lastWateredAt = DateTime.now();
     });
     _persistPlants();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${plant.name} 물주기 완료')),
-    );
+    _showToast('${plant.name} 물주기 완료');
   }
 
   void _savePlant(PlantItem plant, {bool isNew = false}) {
@@ -194,15 +198,11 @@ class _PlantRootPageState extends State<PlantRootPage> {
         setState(() {
           _authUser = user;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${user.provider == 'google' ? '구글' : '애플'} 로그인 성공')),
-        );
+        _showToast('${user.provider == 'google' ? '구글' : '애플'} 로그인 성공');
       }
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('로그인에 실패했습니다: $error')),
-      );
+      _showToast('로그인에 실패했습니다.');
     } finally {
       if (mounted) {
         setState(() {
@@ -218,9 +218,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
     setState(() {
       _authUser = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('로그아웃 되었습니다.')),
-    );
+    _showToast('로그아웃 되었습니다.');
   }
 
   @override
@@ -295,9 +293,11 @@ class HomeTab extends StatelessWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 100),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
@@ -348,7 +348,8 @@ class HomeTab extends StatelessWidget {
                   const EmptyCard(message: '곧 물줄 식물이 아직 없습니다.')
                 else
                   ...soonTasks.map((plant) => CompactPlantCard(plant: plant, onTap: () => onTapPlant(plant))),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -394,6 +395,7 @@ class MyPlantsTab extends StatelessWidget {
           const SizedBox(height: 20),
           Expanded(
             child: ListView.separated(
+              padding: const EdgeInsets.only(bottom: 110),
               itemCount: plants.length,
               separatorBuilder: (context, index) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
@@ -432,6 +434,7 @@ class CalendarTab extends StatelessWidget {
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
               child: ListView(
+                padding: const EdgeInsets.only(bottom: 90),
                 children: [
                   Text('${_monthLabel(DateTime.now())} 관리 예정', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
@@ -496,6 +499,7 @@ class StatsTab extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(20),
       child: ListView(
+        padding: const EdgeInsets.only(bottom: 90),
         children: [
           const Text('통계', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),

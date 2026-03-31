@@ -36,6 +36,7 @@ dependencies:
   shared_preferences: ^2.5.3
   flutter_local_notifications: ^19.4.2
   timezone: ^0.10.1
+  fluttertoast: ^8.2.12
 
 dev_dependencies:
   flutter_test:
