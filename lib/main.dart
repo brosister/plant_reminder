@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'app_settings_service.dart';
 import 'auth_service.dart';
@@ -69,6 +70,7 @@ class PlantRootPage extends StatefulWidget {
 
 class _PlantRootPageState extends State<PlantRootPage> {
   int _currentIndex = 0;
+  BannerAd? _bannerAd;
   AppAuthUser? _authUser;
   bool _isSigningIn = false;
   bool _isLoading = true;
@@ -275,6 +277,12 @@ class _PlantRootPageState extends State<PlantRootPage> {
   }
 
   @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
@@ -348,7 +356,20 @@ class _PlantRootPageState extends State<PlantRootPage> {
           ),
         ],
       ),
-      body: SafeArea(child: pages[_currentIndex]),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(child: pages[_currentIndex]),
+            if (_bannerAd != null)
+              Container(
+                color: Colors.white,
+                width: _bannerAd!.size.width.toDouble(),
+                height: _bannerAd!.size.height.toDouble(),
+                child: AdWidget(ad: _bannerAd!),
+              ),
+          ],
+        ),
+      ),
       floatingActionButton: _currentIndex == 1
           ? FloatingActionButton(
               onPressed: _openAddPlantSheet,
