@@ -8,6 +8,7 @@ import 'notification_service.dart';
 import 'photo_picker_page.dart';
 import 'plant_detail_page.dart';
 import 'plant_models.dart';
+import 'plant_preset_service.dart';
 import 'plant_photo_widgets.dart';
 import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
@@ -71,6 +72,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
   AppAuthUser? _authUser;
   bool _isSigningIn = false;
   bool _isLoading = true;
+  List<PlantPreset> _plantPresets = List<PlantPreset>.from(kPlantPresets);
   AppSettings _settings = const AppSettings(
     notificationsEnabled: true,
     notificationHour: 9,
@@ -122,10 +124,14 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await NotificationService.init();
     final stored = await PlantStorageService.loadPlants();
     final loadedSettings = await AppSettingsService.load();
+    final loadedPresets = await PlantPresetService.loadPresets();
     if (stored.isNotEmpty) {
       _plants
         ..clear()
         ..addAll(stored);
+    }
+    if (loadedPresets.isNotEmpty) {
+      _plantPresets = loadedPresets;
     }
     _settings = loadedSettings;
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
@@ -172,7 +178,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => const PlantEditSheet(),
+      builder: (context) => PlantEditSheet(presets: _plantPresets),
     );
     if (created != null) {
       _savePlant(created, isNew: true);
@@ -184,7 +190,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => PlantEditSheet(existing: plant.copy()),
+      builder: (context) => PlantEditSheet(existing: plant.copy(), presets: _plantPresets),
     );
     if (updated != null) {
       _savePlant(updated);
@@ -1181,9 +1187,10 @@ class _NavItemData {
 }
 
 class PlantEditSheet extends StatefulWidget {
-  const PlantEditSheet({super.key, this.existing});
+  const PlantEditSheet({super.key, this.existing, required this.presets});
 
   final PlantItem? existing;
+  final List<PlantPreset> presets;
 
   @override
   State<PlantEditSheet> createState() => _PlantEditSheetState();
@@ -1194,22 +1201,39 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   late final TextEditingController _locationController;
   late final TextEditingController _memoController;
   late final TextEditingController _cycleController;
+  late final TextEditingController _presetSearchController;
   late PlantPreset _selectedPreset;
   late DateTime _lastWateredAt;
   late List<String> _photoAssetIds;
+  late List<PlantPreset> _availablePresets;
 
   @override
   void initState() {
     super.initState();
     final current = widget.existing;
-    _selectedPreset = kPlantPresets.firstWhere(
+    _availablePresets = widget.presets.isNotEmpty ? List<PlantPreset>.from(widget.presets) : List<PlantPreset>.from(kPlantPresets);
+    _selectedPreset = _availablePresets.firstWhere(
       (preset) => preset.type == current?.type,
-      orElse: () => kPlantPresets.first,
+      orElse: () {
+        if (current != null) {
+          return PlantPreset(
+            type: current.type,
+            defaultWateringCycleDays: current.wateringCycleDays,
+            sunlight: current.sunlight,
+            tip: current.memo,
+          );
+        }
+        return _availablePresets.first;
+      },
     );
+    if (!_availablePresets.any((preset) => preset.type == _selectedPreset.type)) {
+      _availablePresets = [_selectedPreset, ..._availablePresets];
+    }
     _nameController = TextEditingController(text: current?.name ?? '');
     _locationController = TextEditingController(text: current?.location ?? '');
     _memoController = TextEditingController(text: current?.memo ?? _selectedPreset.tip);
     _cycleController = TextEditingController(text: '${current?.wateringCycleDays ?? _selectedPreset.defaultWateringCycleDays}');
+    _presetSearchController = TextEditingController(text: _selectedPreset.type);
     _lastWateredAt = current?.lastWateredAt ?? DateTime.now();
     _photoAssetIds = List<String>.from(current?.photoAssetIds ?? const []);
   }
@@ -1220,7 +1244,23 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     _locationController.dispose();
     _memoController.dispose();
     _cycleController.dispose();
+    _presetSearchController.dispose();
     super.dispose();
+  }
+
+  void _applyPreset(PlantPreset preset) {
+    final previousTip = _selectedPreset.tip;
+    setState(() {
+      _selectedPreset = preset;
+      _presetSearchController.text = preset.type;
+      if (_nameController.text.trim().isEmpty || _nameController.text.trim() == widget.existing?.name) {
+        _nameController.text = preset.type;
+      }
+      _cycleController.text = '${preset.defaultWateringCycleDays}';
+      if (_memoController.text.trim().isEmpty || _memoController.text.trim() == widget.existing?.memo || _memoController.text.trim() == previousTip) {
+        _memoController.text = preset.tip;
+      }
+    });
   }
 
   Future<void> _openPhotoPicker() async {
@@ -1431,27 +1471,84 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                       subtitle: '식물 종류와 이름, 위치를 먼저 정리해둘게요.',
                       child: Column(
                         children: [
-                          DropdownButtonFormField<PlantPreset>(
-                            initialValue: _selectedPreset,
-                            dropdownColor: Colors.white,
-                            decoration: _sheetInputDecoration(label: '식물 종류', icon: Icons.category_rounded),
-                            items: kPlantPresets
-                                .map((preset) => DropdownMenuItem(
-                                      value: preset,
-                                      child: Text('${preset.type} · ${preset.tip}'),
-                                    ))
-                                .toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setState(() {
-                                _selectedPreset = value;
-                                if (_nameController.text.trim().isEmpty) {
-                                  _nameController.text = value.type;
-                                }
-                                _cycleController.text = '${value.defaultWateringCycleDays}';
-                              });
+                          Autocomplete<PlantPreset>(
+                            initialValue: TextEditingValue(text: _selectedPreset.type),
+                            displayStringForOption: (option) => option.type,
+                            optionsBuilder: (textEditingValue) {
+                              final query = textEditingValue.text.trim();
+                              if (query.isEmpty) {
+                                return _availablePresets.take(8);
+                              }
+                              return _availablePresets.where((preset) => preset.matchesQuery(query)).take(8);
+                            },
+                            onSelected: _applyPreset,
+                            fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                              if (_presetSearchController.text != textEditingController.text) {
+                                textEditingController.text = _presetSearchController.text;
+                                textEditingController.selection = TextSelection.collapsed(offset: textEditingController.text.length);
+                              }
+                              return TextField(
+                                controller: textEditingController,
+                                focusNode: focusNode,
+                                decoration: _sheetInputDecoration(
+                                  label: '식물 종류 검색',
+                                  icon: Icons.search_rounded,
+                                  hint: '식물 이름을 입력하면 바로 선택할 수 있어요',
+                                ),
+                                onChanged: (value) {
+                                  final exact = _availablePresets.cast<PlantPreset?>().firstWhere(
+                                        (preset) => preset?.type == value.trim(),
+                                        orElse: () => null,
+                                      );
+                                  if (exact != null && exact.type != _selectedPreset.type) {
+                                    _applyPreset(exact);
+                                  }
+                                },
+                                onSubmitted: (_) => onFieldSubmitted(),
+                              );
+                            },
+                            optionsViewBuilder: (context, onSelected, options) {
+                              final items = options.toList(growable: false);
+                              return Align(
+                                alignment: Alignment.topLeft,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: Container(
+                                    width: MediaQuery.of(context).size.width - 72,
+                                    constraints: const BoxConstraints(maxHeight: 280),
+                                    margin: const EdgeInsets.only(top: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(24),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x14000000),
+                                          blurRadius: 24,
+                                          offset: Offset(0, 12),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ListView.separated(
+                                      padding: const EdgeInsets.all(10),
+                                      shrinkWrap: true,
+                                      itemCount: items.length,
+                                      separatorBuilder: (context, index) => const SizedBox(height: 6),
+                                      itemBuilder: (context, index) {
+                                        final preset = items[index];
+                                        return InkWell(
+                                          onTap: () => onSelected(preset),
+                                          borderRadius: BorderRadius.circular(18),
+                                          child: _PlantPresetOptionTile(preset: preset),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              );
                             },
                           ),
+                          const SizedBox(height: 14),
+                          _SelectedPlantPresetCard(preset: _selectedPreset),
                           const SizedBox(height: 14),
                           TextField(
                             controller: _nameController,
@@ -1817,6 +1914,146 @@ class PlantActionCard extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(child: FilledButton(onPressed: onMarkWatered, child: const Text('물 줬어요'))),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlantPresetAvatar extends StatelessWidget {
+  const _PlantPresetAvatar({
+    required this.preset,
+    this.size = 52,
+    this.radius = 18,
+  });
+
+  final PlantPreset preset;
+  final double size;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = preset.imageUrl;
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Image.network(
+          imageUrl,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _fallback(),
+        ),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5EC),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: const Icon(Icons.local_florist_rounded, color: Color(0xFF2F855A), size: 24),
+    );
+  }
+}
+
+class _PlantPresetOptionTile extends StatelessWidget {
+  const _PlantPresetOptionTile({required this.preset});
+
+  final PlantPreset preset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBF8),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          _PlantPresetAvatar(preset: preset, size: 50, radius: 16),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  preset.type,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${preset.defaultWateringCycleDays}일 주기 · ${preset.sunlight}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  preset.tip,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.black45, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedPlantPresetCard extends StatelessWidget {
+  const _SelectedPlantPresetCard({required this.preset});
+
+  final PlantPreset preset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBF8),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE3ECE6)),
+      ),
+      child: Row(
+        children: [
+          _PlantPresetAvatar(preset: preset, size: 58, radius: 18),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  preset.type,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${preset.defaultWateringCycleDays}일 기본 주기 · ${preset.sunlight}',
+                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  preset.tip,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.black45, fontSize: 12),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -95,16 +95,45 @@ class PlantItem {
 
 class PlantPreset {
   const PlantPreset({
+    this.id,
     required this.type,
     required this.defaultWateringCycleDays,
     required this.sunlight,
     required this.tip,
+    this.imageUrl,
+    this.sortOrder = 0,
+    this.isActive = true,
   });
 
+  final int? id;
   final String type;
   final int defaultWateringCycleDays;
   final String sunlight;
   final String tip;
+  final String? imageUrl;
+  final int sortOrder;
+  final bool isActive;
+
+  factory PlantPreset.fromJson(Map<String, dynamic> json) {
+    return PlantPreset(
+      id: json['id'] as int?,
+      type: (json['type_name'] ?? json['type'] ?? '').toString(),
+      defaultWateringCycleDays: (json['watering_cycle_days'] ?? json['defaultWateringCycleDays'] ?? 7) as int,
+      sunlight: (json['sunlight'] ?? '').toString(),
+      tip: (json['tip'] ?? '').toString(),
+      imageUrl: (json['image_url'] ?? '').toString().trim().isEmpty ? null : (json['image_url'] as String),
+      sortOrder: (json['sort_order'] ?? 0) as int,
+      isActive: json['is_active'] == null ? true : json['is_active'] == true || json['is_active'] == 1,
+    );
+  }
+
+  bool matchesQuery(String query) {
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) return true;
+    return type.toLowerCase().contains(normalized) ||
+        sunlight.toLowerCase().contains(normalized) ||
+        tip.toLowerCase().contains(normalized);
+  }
 }
 
 const List<PlantPreset> kPlantPresets = [
