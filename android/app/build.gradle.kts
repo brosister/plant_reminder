@@ -60,8 +60,10 @@ android {
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
-            } else {
+            } else if (isReleaseBuildRequested) {
                 throw GradleException("Release signing is required. Create root/key.properties before building release artifacts.")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
