@@ -49,6 +49,8 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>식물 물주기 알림을 보내기 위해 알림 권한이 필요합니다.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

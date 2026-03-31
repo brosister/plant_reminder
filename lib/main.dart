@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'auth_service.dart';
+import 'notification_service.dart';
+import 'plant_models.dart';
+import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
 
 void main() {
@@ -25,83 +28,6 @@ class PlantReminderApp extends StatelessWidget {
   }
 }
 
-enum PlantStatus { healthy, soon, today, overdue }
-
-class PlantItem {
-  PlantItem({
-    required this.id,
-    required this.name,
-    required this.type,
-    required this.location,
-    required this.wateringCycleDays,
-    required this.lastWateredAt,
-    required this.memo,
-    required this.sunlight,
-  });
-
-  final String id;
-  String name;
-  String type;
-  String location;
-  int wateringCycleDays;
-  DateTime lastWateredAt;
-  String memo;
-  String sunlight;
-
-  DateTime get nextWateringAt => lastWateredAt.add(Duration(days: wateringCycleDays));
-
-  int get daysUntilWatering {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(nextWateringAt.year, nextWateringAt.month, nextWateringAt.day);
-    return target.difference(today).inDays;
-  }
-
-  PlantStatus get status {
-    final days = daysUntilWatering;
-    if (days < 0) return PlantStatus.overdue;
-    if (days == 0) return PlantStatus.today;
-    if (days <= 1) return PlantStatus.soon;
-    return PlantStatus.healthy;
-  }
-
-  PlantItem copy() {
-    return PlantItem(
-      id: id,
-      name: name,
-      type: type,
-      location: location,
-      wateringCycleDays: wateringCycleDays,
-      lastWateredAt: lastWateredAt,
-      memo: memo,
-      sunlight: sunlight,
-    );
-  }
-}
-
-class PlantPreset {
-  const PlantPreset({
-    required this.type,
-    required this.defaultWateringCycleDays,
-    required this.sunlight,
-    required this.tip,
-  });
-
-  final String type;
-  final int defaultWateringCycleDays;
-  final String sunlight;
-  final String tip;
-}
-
-const List<PlantPreset> kPlantPresets = [
-  PlantPreset(type: '몬스테라', defaultWateringCycleDays: 5, sunlight: '밝은 간접광', tip: '흙 표면이 마르면 물주기'),
-  PlantPreset(type: '스투키', defaultWateringCycleDays: 14, sunlight: '밝은 곳', tip: '과습 주의, 자주 주지 않기'),
-  PlantPreset(type: '포토스', defaultWateringCycleDays: 6, sunlight: '간접광', tip: '잎이 축 처지기 전에 확인'),
-  PlantPreset(type: '선인장', defaultWateringCycleDays: 21, sunlight: '직사광 가능', tip: '완전히 마른 뒤 물주기'),
-  PlantPreset(type: '허브', defaultWateringCycleDays: 3, sunlight: '햇빛 필요', tip: '자주 확인하고 너무 마르지 않게'),
-  PlantPreset(type: '고무나무', defaultWateringCycleDays: 7, sunlight: '밝은 간접광', tip: '통풍 좋은 곳에 두기'),
-];
-
 class PlantRootPage extends StatefulWidget {
   const PlantRootPage({super.key});
 
@@ -113,6 +39,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
   int _currentIndex = 0;
   AppAuthUser? _authUser;
   bool _isSigningIn = false;
+  bool _isLoading = true;
 
   final List<PlantItem> _plants = [
     PlantItem(
@@ -147,10 +74,37 @@ class _PlantRootPageState extends State<PlantRootPage> {
     ),
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await NotificationService.init();
+    final stored = await PlantStorageService.loadPlants();
+    if (stored.isNotEmpty) {
+      _plants
+        ..clear()
+        ..addAll(stored);
+    }
+    await NotificationService.rescheduleForPlants(_plants);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _persistPlants() async {
+    await PlantStorageService.savePlants(_plants);
+    await NotificationService.rescheduleForPlants(_plants);
+  }
+
   void _markWatered(PlantItem plant) {
     setState(() {
       plant.lastWateredAt = DateTime.now();
     });
+    _persistPlants();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${plant.name} 물주기 완료')),
     );
@@ -167,6 +121,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
         }
       }
     });
+    _persistPlants();
   }
 
   Future<void> _openAddPlantSheet() async {
@@ -250,6 +205,12 @@ class _PlantRootPageState extends State<PlantRootPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final pages = [
       HomeTab(plants: _plants, onTapPlant: _openEditPlantSheet, onMarkWatered: _markWatered),
       MyPlantsTab(plants: _plants, onTapPlant: _openEditPlantSheet, onAddPlant: _openAddPlantSheet),
@@ -635,9 +596,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
             DropdownButtonFormField<PlantPreset>(
               initialValue: _selectedPreset,
               decoration: _inputDecoration('식물 종류'),
-              items: kPlantPresets
-                  .map((preset) => DropdownMenuItem(value: preset, child: Text('${preset.type} · ${preset.tip}')))
-                  .toList(),
+              items: kPlantPresets.map((preset) => DropdownMenuItem(value: preset, child: Text('${preset.type} · ${preset.tip}'))).toList(),
               onChanged: (value) {
                 if (value == null) return;
                 setState(() {
@@ -709,12 +668,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
 }
 
 class PlantActionCard extends StatelessWidget {
-  const PlantActionCard({
-    super.key,
-    required this.plant,
-    required this.onTap,
-    required this.onMarkWatered,
-  });
+  const PlantActionCard({super.key, required this.plant, required this.onTap, required this.onMarkWatered});
 
   final PlantItem plant;
   final VoidCallback onTap;
@@ -748,10 +702,7 @@ class PlantActionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(16),
-            ),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16)),
             child: Row(
               children: [
                 Icon(Icons.water_drop_outlined, color: color),
@@ -930,12 +881,7 @@ class EmptyCard extends StatelessWidget {
 }
 
 class SettingsTile extends StatelessWidget {
-  const SettingsTile({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
+  const SettingsTile({super.key, required this.icon, required this.title, required this.subtitle});
 
   final IconData icon;
   final String title;
