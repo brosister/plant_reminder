@@ -28,6 +28,9 @@ class SettingsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       child: DefaultTabController(
         length: 3,
         child: SizedBox(
@@ -35,15 +38,29 @@ class SettingsDialog extends StatelessWidget {
           height: 520,
           child: Column(
             children: [
-              const SizedBox(height: 16),
-              const Text('설정', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              const TabBar(
-                tabs: [
-                  Tab(text: '계정'),
-                  Tab(text: '알림'),
-                  Tab(text: '기타'),
-                ],
+              const SizedBox(height: 20),
+              const Text('설정', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 14),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F6F4),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const TabBar(
+                  dividerColor: Colors.transparent,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicator: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.all(Radius.circular(14)),
+                  ),
+                  tabs: [
+                    Tab(text: '계정'),
+                    Tab(text: '알림'),
+                    Tab(text: '기타'),
+                  ],
+                ),
               ),
               Expanded(
                 child: TabBarView(

@@ -17,17 +17,29 @@ class PlantPhotoThumb extends StatelessWidget {
   final double height;
   final double borderRadius;
 
+  static final Map<String, Future<AssetEntity?>> _entityFutures = <String, Future<AssetEntity?>>{};
+  static final Map<String, Future<Uint8List?>> _thumbnailFutures = <String, Future<Uint8List?>>{};
+
   @override
   Widget build(BuildContext context) {
+    final cacheWidth = width.isFinite ? width.round().clamp(1, 512) : 300;
+    final cacheHeight = height.isFinite ? height.round().clamp(1, 512) : 300;
+    final entityFuture = _entityFutures.putIfAbsent(assetId, () => AssetEntity.fromId(assetId));
+
     return FutureBuilder<AssetEntity?>(
-      future: AssetEntity.fromId(assetId),
+      future: entityFuture,
       builder: (context, snapshot) {
         final entity = snapshot.data;
         if (entity == null) {
           return _fallback();
         }
+        final thumbKey = '$assetId:$cacheWidth:$cacheHeight';
+        final thumbFuture = _thumbnailFutures.putIfAbsent(
+          thumbKey,
+          () => entity.thumbnailDataWithSize(ThumbnailSize(cacheWidth, cacheHeight)),
+        );
         return FutureBuilder<Uint8List?>(
-          future: entity.thumbnailDataWithSize(const ThumbnailSize(300, 300)),
+          future: thumbFuture,
           builder: (context, thumbSnapshot) {
             final data = thumbSnapshot.data;
             if (data == null) return _fallback();
@@ -38,6 +50,8 @@ class PlantPhotoThumb extends StatelessWidget {
                 width: width,
                 height: height,
                 fit: BoxFit.cover,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
               ),
             );
           },
