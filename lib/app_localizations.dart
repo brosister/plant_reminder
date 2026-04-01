@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'plant_models.dart';
 
 class AppLocalizations {
   AppLocalizations(this.locale);
@@ -826,7 +827,7 @@ class AppLocalizations {
       : (_code == 'ko' ? '오늘은 한결 여유로운 날이에요.' : _code == 'ja' ? '今日は少し余裕のある日です。' : _code == 'zh' ? '今天是相对轻松的一天。' : 'Today looks a little more relaxed.');
   String pageLabelManageMonth(DateTime date) => _code == 'ko' ? '${monthLabel(date)} 관리 예정' : _code == 'ja' ? '${monthLabel(date)}の管理予定' : _code == 'zh' ? '${monthLabel(date)} 管理计划' : '${monthLabel(date)} schedule';
   String monthCalendarTitle(DateTime date) => _code == 'ko' ? '${monthLabel(date)} 캘린더' : _code == 'ja' ? '${monthLabel(date)} カレンダー' : _code == 'zh' ? '${monthLabel(date)} 日历' : '${monthLabel(date)} calendar';
-  String registeredPlantsCount(int count) => _code == 'ko' ? '$count개' : _code == 'ja' ? '$count件' : _code == 'zh' ? '$count 个' : '$count';
+  String registeredPlantsCount(int count) => _code == 'ko' ? '$count개' : _code == 'ja' ? '$count件' : _code == 'zh' ? '$count 个' : '$count plants';
   String averageCycle(int days) => days == 0 ? '-' : (_code == 'ko' ? '$days일' : _code == 'ja' ? '$days日' : _code == 'zh' ? '$days 天' : '$days d');
   String overallStatsHint(String strongestName) => _code == 'ko' ? '$strongestName부터 루틴을 챙기면 오늘 관리가 훨씬 쉬워져요.' : _code == 'ja' ? '$strongestName から先にチェックすると今日の管理が楽になります。' : _code == 'zh' ? '先从 $strongestName 开始，会让今天的管理更轻松。' : 'Start with $strongestName and today\'s routine will feel much easier.';
   String totalPlantsMetric(int count) => _code == 'ko' ? '$count개' : _code == 'ja' ? '$count件' : _code == 'zh' ? '$count 个' : '$count';
@@ -912,6 +913,41 @@ class AppLocalizations {
       : 'Register "$query"';
   String activityCountProgress(int current, int total) => _code == 'ko' ? '$current/$total개 표시 중' : _code == 'ja' ? '$current/$total件を表示中' : _code == 'zh' ? '正在显示 $current/$total 条' : 'Showing $current/$total';
   String photoPositionLabel(int current, int total) => _code == 'ko' ? '사진 $current/$total' : _code == 'ja' ? '写真 $current/$total' : _code == 'zh' ? '照片 $current/$total' : 'Photo $current/$total';
+  String weekRangeLabel(DateTime start, DateTime end) => _code == 'ko' ? '${start.month}월 ${start.day}일 - ${end.month}월 ${end.day}일' : _code == 'ja' ? '${start.month}月${start.day}日 - ${end.month}月${end.day}日' : _code == 'zh' ? '${start.month}月${start.day}日 - ${end.month}月${end.day}日' : '${_englishMonths[start.month - 1]} ${start.day} - ${_englishMonths[end.month - 1]} ${end.day}';
+  String weeklyPlantsCount(int count) => _code == 'ko' ? '이번 주 예정된 식물 $count개' : _code == 'ja' ? '今週予定の植物 $count件' : _code == 'zh' ? '本周计划植物 $count 个' : '$count plants scheduled this week';
+  String get thisWeekScheduleTitle => _code == 'ko' ? '이번 주 예정' : _code == 'ja' ? '今週の予定' : _code == 'zh' ? '本周计划' : 'This week';
+  String get thisWeekScheduleHint => _code == 'ko' ? '이번 주 물주기 흐름을 한 번에 볼 수 있어요.' : _code == 'ja' ? '今週の水やりの流れをまとめて確認できます。' : _code == 'zh' ? '可以一次查看本周的浇水节奏。' : 'See this week’s watering flow at a glance.';
+  String get noWeeklyPlants => _code == 'ko' ? '이번 주 예정된 식물이 없습니다.' : _code == 'ja' ? '今週予定された植物はありません。' : _code == 'zh' ? '本周没有计划中的植物。' : 'No plants are scheduled this week.';
+  String selectedDateLabel(DateTime date) => _code == 'ko' ? '${date.month}월 ${date.day}일' : _code == 'ja' ? '${date.month}月${date.day}日' : _code == 'zh' ? '${date.month}月${date.day}日' : '${_englishMonths[date.month - 1]} ${date.day}';
+  String get noPlantsForSelectedDate => _code == 'ko' ? '이 날짜에 예정된 물주기 식물이 없습니다.' : _code == 'ja' ? 'この日に予定された水やり植物はありません。' : _code == 'zh' ? '这一天没有计划浇水的植物。' : 'No plants are scheduled for watering on this date.';
+  String wateringPlannedLabel(String plantName) => _code == 'ko' ? '$plantName 물주기 예정' : _code == 'ja' ? '$plantName の水やり予定' : _code == 'zh' ? '$plantName 计划浇水' : '$plantName watering scheduled';
+  String get waterInAdvance => _code == 'ko' ? '미리 물 주기' : _code == 'ja' ? '先に水やり' : _code == 'zh' ? '提前浇水' : 'Water now';
+  String get organizedPlantsTitle => _code == 'ko' ? '정리된 식물' : _code == 'ja' ? '整った植物' : _code == 'zh' ? '整理中的植物' : 'Organized plants';
+  String get stableStateSubtitle => _code == 'ko' ? '지금 안정 상태' : _code == 'ja' ? 'いま安定状態' : _code == 'zh' ? '当前稳定状态' : 'Currently stable';
+  String get nextWateringTitle => _code == 'ko' ? '다음 물 주기' : _code == 'ja' ? '次の水やり' : _code == 'zh' ? '下次浇水' : 'Next watering';
+  String withinDaysLabel(int days) => _code == 'ko' ? '$days일 이내' : _code == 'ja' ? '$days日以内' : _code == 'zh' ? '$days 天内' : 'Within $days d';
+  String get todayShortLabel => _code == 'ko' ? '오늘' : _code == 'ja' ? '今日' : _code == 'zh' ? '今天' : 'Today';
+  String get todaySectionTitle => _code == 'ko' ? '오늘' : _code == 'ja' ? '今日' : _code == 'zh' ? '今天' : 'Today';
+  String todaySectionHint(bool hasUrgentTasks) => hasUrgentTasks ? (_code == 'ko' ? '지금 처리해야 하는 식물 과제를 먼저 보여드릴게요.' : _code == 'ja' ? '今すぐ処理したい植物タスクを先に表示します。' : _code == 'zh' ? '先为你显示现在要处理的植物任务。' : 'Here are the plant tasks you should handle first.') : (_code == 'ko' ? '오늘 급한 과제는 없지만 곧 체크할 식물을 정리해두었어요.' : _code == 'ja' ? '今日急ぎのタスクはありませんが、もうすぐ確認したい植物を整理しました。' : _code == 'zh' ? '今天没有紧急任务，但我已经整理好了即将要检查的植物。' : 'There is nothing urgent today, but these plants will need attention soon.');
+  String get noTasksToday => _code == 'ko' ? '오늘 표시할 과제가 없어요.' : _code == 'ja' ? '今日表示するタスクはありません。' : _code == 'zh' ? '今天没有可显示的任务。' : 'There are no tasks to show today.';
+  String get completeAllTasks => _code == 'ko' ? '모든 과제 처리' : _code == 'ja' ? 'すべてのタスクを処理' : _code == 'zh' ? '处理全部任务' : 'Complete all tasks';
+  String actionTileTitle(bool isSoon) => isSoon ? (_code == 'ko' ? '상태 확인' : _code == 'ja' ? '状態確認' : _code == 'zh' ? '状态检查' : 'Check status') : (_code == 'ko' ? '물 주기' : _code == 'ja' ? '水やり' : _code == 'zh' ? '浇水' : 'Water');
+  String actionTileSubtitle(PlantStatus status, int daysUntilWatering) => status == PlantStatus.overdue ? (_code == 'ko' ? '${daysUntilWatering.abs()}일 지남' : _code == 'ja' ? '${daysUntilWatering.abs()}日経過' : _code == 'zh' ? '已过 ${daysUntilWatering.abs()} 天' : '${daysUntilWatering.abs()} days overdue') : status == PlantStatus.today ? (_code == 'ko' ? '오늘 해야 해요' : _code == 'ja' ? '今日やるとよいです' : _code == 'zh' ? '今天该处理了' : 'Do it today') : (_code == 'ko' ? '곧 체크 권장' : _code == 'ja' ? 'まもなく確認推奨' : _code == 'zh' ? '建议尽快检查' : 'Check soon');
+  String get soonTasksTitle => _code == 'ko' ? '곧 할 일' : _code == 'ja' ? 'まもなくやること' : _code == 'zh' ? '即将要做' : 'Coming up';
+  String get soonTasksHint => _code == 'ko' ? '하루 이틀 안에 체크하면 좋은 식물만 모아두었어요.' : _code == 'ja' ? '1〜2日以内に確認するとよい植物だけを集めました。' : _code == 'zh' ? '这里整理了 1~2 天内适合查看的植物。' : 'These are the plants worth checking within a day or two.';
+  String get routineStableTitle => _code == 'ko' ? '루틴이 안정적이에요' : _code == 'ja' ? 'ルーティンは安定しています' : _code == 'zh' ? '你的护理节奏很稳定' : 'Your routine looks stable';
+  String stableRoutineBody(int healthyCount) => _code == 'ko' ? '현재 $healthyCount개의 식물이 안정 상태예요. 오늘은 가볍게 둘러보면 됩니다.' : _code == 'ja' ? '現在 $healthyCount 件の植物が安定状態です。今日は軽く見回るだけで大丈夫です。' : _code == 'zh' ? '目前有 $healthyCount 株植物处于稳定状态，今天轻松看看就可以。' : '$healthyCount plants are currently stable. A light check is enough today.';
+  String groupedPlantsSubtitle(int count) => _code == 'ko' ? '$count 식물' : _code == 'ja' ? '植物 $count件' : _code == 'zh' ? '$count 株植物' : '$count plants';
+  String groupedRegisteredSubtitle(int count) => _code == 'ko' ? '$count 등록됨' : _code == 'ja' ? '$count件登録済み' : _code == 'zh' ? '已登记 $count 个' : '$count registered';
+  String get plantTabLabel => _code == 'ko' ? '식물' : _code == 'ja' ? '植物' : _code == 'zh' ? '植物' : 'Plant';
+  String get photoTabLabel => _code == 'ko' ? '사진' : _code == 'ja' ? '写真' : _code == 'zh' ? '照片' : 'Photo';
+  String statusBadgeLabel(PlantStatus status) => status == PlantStatus.healthy ? (_code == 'ko' ? '여유 있음' : _code == 'ja' ? '余裕あり' : _code == 'zh' ? '比较从容' : 'Relaxed') : status == PlantStatus.soon ? (_code == 'ko' ? '곧 필요' : _code == 'ja' ? 'まもなく必要' : _code == 'zh' ? '即将需要' : 'Soon') : (_code == 'ko' ? '지금 필요' : _code == 'ja' ? '今必要' : _code == 'zh' ? '现在需要' : 'Need now');
+  String statusBadgeDetail(PlantStatus status, int daysUntilWatering) => status == PlantStatus.soon ? (_code == 'ko' ? ' ($daysUntilWatering일 후)' : _code == 'ja' ? ' ($daysUntilWatering日後)' : _code == 'zh' ? ' ($daysUntilWatering天后)' : ' (in $daysUntilWatering d)') : status == PlantStatus.overdue ? (_code == 'ko' ? ' (${daysUntilWatering.abs()}일 지남)' : _code == 'ja' ? ' (${daysUntilWatering.abs()}日経過)' : _code == 'zh' ? ' (已过${daysUntilWatering.abs()}天)' : ' (${daysUntilWatering.abs()} d overdue)') : status == PlantStatus.today ? (_code == 'ko' ? ' (오늘)' : _code == 'ja' ? ' (今日)' : _code == 'zh' ? ' (今天)' : ' (today)') : '';
+  String lastWateredAgoLabel(int days) => _code == 'ko' ? '마지막 물주기: $days일 전' : _code == 'ja' ? '最後の水やり: $days日前' : _code == 'zh' ? '上次浇水: $days天前' : 'Last watered: $days days ago';
+  String get urgentTooltip => _code == 'ko' ? '지금 안정 상태가 아닌 식물 수예요. 먼저 확인하면 좋아요.' : _code == 'ja' ? '今安定状態ではない植物の数です。先に確認するとよいです。' : _code == 'zh' ? '这是当前不在稳定状态的植物数量，建议先查看。' : 'This is the number of plants that are not currently stable. Check them first.';
+  String urgentCountLabel(int count) => _code == 'ko' ? '체크 $count개' : _code == 'ja' ? 'チェック $count件' : _code == 'zh' ? '检查 $count 个' : '$count to check';
+  String get pinToHomeTooltip => _text('home');
+  String get editTooltip => _text('edit');
   String reminderChannelDescription() => _code == 'ko' ? '식물 물주기 알림 채널' : _code == 'ja' ? '植物水やり通知チャンネル' : _code == 'zh' ? '植物浇水提醒频道' : 'Plant watering reminder channel';
   String monthLabel(DateTime date) => _code == 'ko' ? '${date.year}년 ${date.month}월' : _code == 'ja' ? '${date.year}年${date.month}月' : _code == 'zh' ? '${date.year}年${date.month}月' : '${_englishMonths[date.month - 1]} ${date.year}';
   String dateLabel(DateTime date) => _code == 'ko' || _code == 'ja' || _code == 'zh'

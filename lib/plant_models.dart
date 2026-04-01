@@ -15,6 +15,7 @@ class PlantItem {
     required this.lastWateredAt,
     required this.memo,
     required this.sunlight,
+    this.presetImageUrl,
     this.photoAssetIds = const [],
   });
 
@@ -26,6 +27,7 @@ class PlantItem {
   DateTime lastWateredAt;
   String memo;
   String sunlight;
+  String? presetImageUrl;
   List<String> photoAssetIds;
 
   DateTime get nextWateringAt => lastWateredAt.add(Duration(days: wateringCycleDays));
@@ -55,6 +57,7 @@ class PlantItem {
       lastWateredAt: lastWateredAt,
       memo: memo,
       sunlight: sunlight,
+      presetImageUrl: presetImageUrl,
       photoAssetIds: List<String>.from(photoAssetIds),
     );
   }
@@ -68,6 +71,7 @@ class PlantItem {
         'lastWateredAt': lastWateredAt.toIso8601String(),
         'memo': memo,
         'sunlight': sunlight,
+        'presetImageUrl': presetImageUrl,
         'photoAssetIds': photoAssetIds,
       };
 
@@ -80,6 +84,7 @@ class PlantItem {
         lastWateredAt: DateTime.parse(json['lastWateredAt'] as String),
         memo: json['memo'] as String,
         sunlight: json['sunlight'] as String,
+        presetImageUrl: json['presetImageUrl'] as String?,
         photoAssetIds: (json['photoAssetIds'] as List<dynamic>? ?? const [])
             .map((e) => e.toString())
             .toList(),
@@ -161,6 +166,7 @@ class PlantPreset {
     required this.sunlight,
     required this.tip,
     this.imageUrl,
+    this.aliases = const [],
     this.sortOrder = 0,
     this.isActive = true,
   });
@@ -171,22 +177,41 @@ class PlantPreset {
   final String sunlight;
   final String tip;
   final String? imageUrl;
+  final List<String> aliases;
   final int sortOrder;
   final bool isActive;
 
-  factory PlantPreset.fromJson(Map<String, dynamic> json) {
+  factory PlantPreset.fromJson(
+    Map<String, dynamic> json, {
+    String localeCode = 'en',
+  }) {
     final rawImageUrl = (json['image_url'] ?? '').toString().trim();
+    final resolvedLocaleCode = _normalizePresetLocale(localeCode);
+    final aliases = _collectPresetAliases(json);
     return PlantPreset(
       id: json['id'] as int?,
-      type: (json['type_name'] ?? json['type'] ?? '').toString(),
+      type: _localizedPresetText(
+        json,
+        localeCode: resolvedLocaleCode,
+        baseKeys: const ['type_name', 'type', 'name'],
+      ),
       defaultWateringCycleDays: (json['watering_cycle_days'] ?? json['defaultWateringCycleDays'] ?? 7) as int,
-      sunlight: (json['sunlight'] ?? '').toString(),
-      tip: (json['tip'] ?? '').toString(),
+      sunlight: _localizedPresetText(
+        json,
+        localeCode: resolvedLocaleCode,
+        baseKeys: const ['sunlight'],
+      ),
+      tip: _localizedPresetText(
+        json,
+        localeCode: resolvedLocaleCode,
+        baseKeys: const ['tip', 'description', 'memo'],
+      ),
       imageUrl: rawImageUrl.isEmpty
           ? null
           : (rawImageUrl.startsWith('http')
               ? rawImageUrl
               : '$_plantReminderBaseUrl${rawImageUrl.startsWith('/') ? '' : '/'}$rawImageUrl'),
+      aliases: aliases,
       sortOrder: (json['sort_order'] ?? 0) as int,
       isActive: json['is_active'] == null ? true : json['is_active'] == true || json['is_active'] == 1,
     );
@@ -199,6 +224,96 @@ class PlantPreset {
         sunlight.toLowerCase().contains(normalized) ||
         tip.toLowerCase().contains(normalized);
   }
+}
+
+List<String> _collectPresetAliases(Map<String, dynamic> json) {
+  final aliases = <String>{};
+
+  void addAlias(dynamic value) {
+    final text = (value ?? '').toString().trim();
+    if (text.isNotEmpty) {
+      aliases.add(text);
+    }
+  }
+
+  for (final key in const [
+    'type_name',
+    'type_name_ko',
+    'type_name_en',
+    'type_name_ja',
+    'type_name_zh',
+    'type',
+    'name',
+  ]) {
+    addAlias(json[key]);
+  }
+
+  final translations = json['translations'];
+  if (translations is Map) {
+    for (final value in translations.values) {
+      if (value is Map) {
+        addAlias(value['type_name']);
+        addAlias(value['name']);
+      }
+    }
+  }
+
+  return aliases.toList(growable: false);
+}
+
+String _normalizePresetLocale(String raw) {
+  switch (raw.toLowerCase()) {
+    case 'ko':
+    case 'en':
+    case 'ja':
+    case 'zh':
+      return raw.toLowerCase();
+    default:
+      return 'en';
+  }
+}
+
+String _localizedPresetText(
+  Map<String, dynamic> json, {
+  required String localeCode,
+  required List<String> baseKeys,
+}) {
+  final localeSuffixes = switch (localeCode) {
+    'ko' => const ['ko', 'kr'],
+    'ja' => const ['ja', 'jp'],
+    'zh' => const ['zh', 'cn', 'tw'],
+    _ => const ['en'],
+  };
+
+  final candidateKeys = <String>[
+    for (final baseKey in baseKeys) ...[
+      for (final suffix in localeSuffixes) ...[
+        '${baseKey}_$suffix',
+        '$baseKey${suffix.toUpperCase()}',
+      ],
+      baseKey,
+    ],
+  ];
+
+  for (final key in candidateKeys) {
+    final value = (json[key] ?? '').toString().trim();
+    if (value.isNotEmpty) {
+      return value;
+    }
+  }
+
+  for (final baseKey in baseKeys) {
+    for (final entry in json.entries) {
+      final normalizedKey = entry.key.toLowerCase();
+      if (!normalizedKey.startsWith(baseKey.toLowerCase())) continue;
+      final value = (entry.value ?? '').toString().trim();
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+  }
+
+  return '';
 }
 
 const List<PlantPreset> kPlantPresets = [

@@ -10,6 +10,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'ad_service.dart';
 import 'app_localizations.dart';
 import 'app_settings_service.dart';
+import 'app_user_service.dart';
 import 'auth_session_service.dart';
 import 'auth_service.dart';
 import 'firebase_service.dart';
@@ -112,6 +113,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
   bool _isBannerLoading = false;
   int? _bannerWidth;
   AppAuthUser? _authUser;
+  AppUserIdentity? _appUserIdentity;
   bool _isSigningIn = false;
   bool _isSyncing = false;
   bool _isLoading = true;
@@ -143,6 +145,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
     final loadedSettings = await AppSettingsService.load();
     final loadedPresets = await PlantPresetService.loadPresets();
     final savedAuthUser = await AuthSessionService.loadUser();
+    final appUserIdentity = await AppUserIdentityService.ensureIdentity();
     if (stored.isNotEmpty) {
       _plants
         ..clear()
@@ -156,7 +159,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
               plant: plant,
               type: PlantActivityType.registered,
               occurredAt: plant.lastWateredAt,
-              detail: '초기 등록 데이터',
+              detail: null,
             ),
           )
           .toList();
@@ -164,11 +167,30 @@ class _PlantRootPageState extends State<PlantRootPage> {
     if (loadedPresets.isNotEmpty) {
       _plantPresets = loadedPresets;
     }
+    final backfilledPresetImages = _applyPresetImagesToPlants(
+      _plants,
+      _plantPresets,
+    );
     _settings = loadedSettings;
     await _syncNotificationPermissionState(showToast: false);
     _authUser = savedAuthUser;
+    _appUserIdentity = appUserIdentity;
+    try {
+      _appUserIdentity = savedAuthUser == null
+          ? await AppUserService.registerDeviceUser(appUserIdentity)
+          : await AppUserService.linkSocialAccount(
+              identity: appUserIdentity,
+              authUser: savedAuthUser,
+            );
+      await AppUserIdentityService.save(_appUserIdentity!);
+    } catch (_) {
+      _appUserIdentity = appUserIdentity;
+    }
     if (savedAuthUser != null) {
       await _restoreCloudDataIfNeeded(savedAuthUser);
+    }
+    if (backfilledPresetImages) {
+      await PlantStorageService.savePlants(_plants);
     }
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     if (!mounted) return;
@@ -277,6 +299,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
     _plants
       ..clear()
       ..addAll(plants.map((item) => item.copy()));
+    _applyPresetImagesToPlants(_plants, _plantPresets);
     _activityLog
       ..clear()
       ..addAll(activityLog);
@@ -613,6 +636,17 @@ class _PlantRootPageState extends State<PlantRootPage> {
       if (user != null) {
         String? syncToast;
         await AuthSessionService.saveUser(user);
+        final currentIdentity =
+            _appUserIdentity ?? await AppUserIdentityService.ensureIdentity();
+        try {
+          _appUserIdentity = await AppUserService.linkSocialAccount(
+            identity: currentIdentity,
+            authUser: user,
+          );
+          await AppUserIdentityService.save(_appUserIdentity!);
+        } catch (_) {
+          _appUserIdentity = currentIdentity;
+        }
         final profile = await PlantSyncService.fetchProfile(user);
         final hasLocalData = _plants.isNotEmpty;
         if (profile.exists && hasLocalData) {
@@ -1634,7 +1668,7 @@ class _CalendarTabState extends State<CalendarTab> {
                     child: Column(
                       children: [
                         Text(
-                          '${_weekStart.month}월 ${_weekStart.day}일 - ${weekDays.last.month}월 ${weekDays.last.day}일',
+                          l10n.weekRangeLabel(_weekStart, weekDays.last),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 20,
@@ -1644,7 +1678,7 @@ class _CalendarTabState extends State<CalendarTab> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '이번 주 예정된 식물 ${weeklyPlants.length}개',
+                          l10n.weeklyPlantsCount(weeklyPlants.length),
                           style: const TextStyle(
                             color: Color(0xFF5F746A),
                             fontWeight: FontWeight.w600,
@@ -1726,20 +1760,20 @@ class _CalendarTabState extends State<CalendarTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '이번 주 예정',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              Text(
+                l10n.thisWeekScheduleTitle,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 8),
               Text(
-                weeklyPlants.isEmpty ? l10n.calendarNoSchedule : '이번 주 물주기 흐름을 한 번에 볼 수 있어요.',
+                weeklyPlants.isEmpty ? l10n.calendarNoSchedule : l10n.thisWeekScheduleHint,
                 style: const TextStyle(color: Colors.black54, height: 1.45),
               ),
               const SizedBox(height: 14),
               if (weeklyPlants.isEmpty)
-                const Text(
-                  '이번 주 예정된 식물이 없습니다.',
-                  style: TextStyle(color: Colors.black54),
+                Text(
+                  l10n.noWeeklyPlants,
+                  style: const TextStyle(color: Colors.black54),
                 )
               else
                 ...weeklyPlants.map(
@@ -1805,7 +1839,7 @@ class _CalendarTabState extends State<CalendarTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${_selectedDate.month}월 ${_selectedDate.day}일',
+                l10n.selectedDateLabel(_selectedDate),
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
@@ -1813,9 +1847,9 @@ class _CalendarTabState extends State<CalendarTab> {
               ),
               const SizedBox(height: 8),
               if (selectedPlants.isEmpty)
-                const Text(
-                  '이 날짜에 예정된 물주기 식물이 없습니다.',
-                  style: TextStyle(color: Colors.black54),
+                Text(
+                  l10n.noPlantsForSelectedDate,
+                  style: const TextStyle(color: Colors.black54),
                 )
               else ...[
                 ...selectedPlants.map(
@@ -1840,8 +1874,8 @@ class _CalendarTabState extends State<CalendarTab> {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(
-                              '${plant.name} 물주기 예정',
+                          child: Text(
+                              l10n.wateringPlannedLabel(plant.name),
                               style: const TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
@@ -1861,7 +1895,7 @@ class _CalendarTabState extends State<CalendarTab> {
                       borderRadius: BorderRadius.circular(18),
                     ),
                   ),
-                  child: const Text('미리 물 주기'),
+                  child: Text(l10n.waterInAdvance),
                 ),
               ],
             ],
@@ -2719,18 +2753,14 @@ class _PlantImagePlaceholder extends StatelessWidget {
     return DecoratedBox(
       decoration: background,
       child: Center(
-        child: Container(
-          width: iconSize * 1.9,
-          height: iconSize * 1.9,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(iconSize),
-          ),
-          child: Padding(
-            padding: EdgeInsets.all(iconSize * 0.34),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(iconSize * 0.72),
+          child: SizedBox(
+            width: iconSize * 1.7,
+            height: iconSize * 1.7,
             child: Image.asset(
               'assets/branding/app_logo.png',
-              fit: BoxFit.contain,
+              fit: BoxFit.cover,
             ),
           ),
         ),
@@ -2786,6 +2816,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
               cycleDays: current.wateringCycleDays,
               sunlight: current.sunlight,
               tip: current.memo,
+              imageUrl: current.presetImageUrl,
             ),
           )
         : _manualPreset('', cycleDays: fallbackCycle);
@@ -2842,12 +2873,14 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     int cycleDays = 7,
     String sunlight = '',
     String tip = '',
+    String? imageUrl,
   }) {
     return PlantPreset(
       type: type.trim(),
       defaultWateringCycleDays: cycleDays,
       sunlight: sunlight,
       tip: tip,
+      imageUrl: imageUrl,
     );
   }
 
@@ -3551,6 +3584,11 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                           sunlight: _selectedPreset.sunlight.trim().isEmpty
                               ? ''
                               : _selectedPreset.sunlight,
+                          presetImageUrl: (_selectedPreset.imageUrl ?? '')
+                                  .trim()
+                                  .isEmpty
+                              ? widget.existing?.presetImageUrl
+                              : _selectedPreset.imageUrl,
                           photoAssetIds: List<String>.from(_photoAssetIds),
                         );
                         Navigator.of(
@@ -4894,10 +4932,7 @@ class HomeDashboardTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final sortedPlants = _sortPlantsByUrgency(plants);
-    final presetImageByType = {
-      for (final preset in presets)
-        if ((preset.imageUrl ?? '').isNotEmpty) preset.type: preset.imageUrl!,
-    };
+    final presetImageByType = _buildPresetImageByType(presets);
     final urgentTasks = sortedPlants
         .where(
           (plant) =>
@@ -4930,7 +4965,10 @@ class HomeDashboardTab extends StatelessWidget {
         else
           _HomeImmersiveSection(
             plant: primaryPlant,
-            presetImageUrl: presetImageByType[primaryPlant.type],
+            presetImageUrl: _plantPresetImageUrl(
+              presetImageByType,
+              primaryPlant,
+            ),
             healthyCount: healthyCount,
             totalCount: plants.length,
             assignmentPanel: _HomeAssignmentPanel(
@@ -5064,9 +5102,9 @@ class _HomeFocusPlantCard extends StatelessWidget {
                         icon: Icons.park_rounded,
                         iconColor: const Color(0xFF2F855A),
                         ringColor: const Color(0xFFBFE3CE),
-                        title: '정리된 식물',
+                        title: l10n.organizedPlantsTitle,
                         value: '$healthyCount / $totalCount',
-                        subtitle: '지금 안정 상태',
+                        subtitle: l10n.stableStateSubtitle,
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -5075,10 +5113,10 @@ class _HomeFocusPlantCard extends StatelessWidget {
                         icon: Icons.event_available_rounded,
                         iconColor: const Color(0xFF2F855A),
                         ringColor: const Color(0xFFBFE3CE),
-                        title: '다음 물 주기',
+                        title: l10n.nextWateringTitle,
                         value: plant.daysUntilWatering <= 0
-                            ? '오늘'
-                            : '${plant.daysUntilWatering}일 이내',
+                            ? l10n.todayShortLabel
+                            : l10n.withinDaysLabel(plant.daysUntilWatering),
                         subtitle: _dateLabel(plant.nextWateringAt),
                       ),
                     ),
@@ -5272,9 +5310,9 @@ class _HomeImmersiveSection extends StatelessWidget {
                           icon: Icons.park_rounded,
                           iconColor: const Color(0xFF2F855A),
                           ringColor: const Color(0xFFBFE3CE),
-                          title: '정리된 식물',
-                          value: '$healthyCount / $totalCount',
-                          subtitle: '지금 안정 상태',
+                        title: l10n.organizedPlantsTitle,
+                        value: '$healthyCount / $totalCount',
+                        subtitle: l10n.stableStateSubtitle,
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -5283,10 +5321,10 @@ class _HomeImmersiveSection extends StatelessWidget {
                           icon: Icons.event_available_rounded,
                           iconColor: const Color(0xFF2F855A),
                           ringColor: const Color(0xFFBFE3CE),
-                          title: '다음 물 주기',
+                          title: l10n.nextWateringTitle,
                           value: plant.daysUntilWatering <= 0
-                              ? '오늘'
-                              : '${plant.daysUntilWatering}일 이내',
+                              ? l10n.todayShortLabel
+                              : l10n.withinDaysLabel(plant.daysUntilWatering),
                           subtitle: _dateLabel(plant.nextWateringAt),
                         ),
                       ),
@@ -5388,6 +5426,7 @@ class _HomeAssignmentPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -5397,20 +5436,20 @@ class _HomeAssignmentPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '오늘',
-            style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+          Text(
+            l10n.todaySectionTitle,
+            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
             hasUrgentTasks
-                ? '지금 처리해야 하는 식물 과제를 먼저 보여드릴게요.'
-                : '오늘 급한 과제는 없지만 곧 체크할 식물을 정리해두었어요.',
+                ? l10n.todaySectionHint(true)
+                : l10n.todaySectionHint(false),
             style: const TextStyle(color: Colors.black54, height: 1.4),
           ),
           const SizedBox(height: 14),
           if (tasks.isEmpty)
-            const EmptyCard(message: '오늘 표시할 과제가 없어요.')
+            EmptyCard(message: l10n.noTasksToday)
           else
             ..._withGaps(
               tasks.map((plant) {
@@ -5438,9 +5477,9 @@ class _HomeAssignmentPanel extends StatelessWidget {
                 ),
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
-              child: const Text(
-                '모든 과제 처리',
-                style: TextStyle(fontWeight: FontWeight.w800),
+              child: Text(
+                l10n.completeAllTasks,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -5463,13 +5502,13 @@ class _HomeAssignmentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final color = _statusColor(plant.status);
-    final title = plant.status == PlantStatus.soon ? '상태 확인' : '물 주기';
-    final subtitle = plant.status == PlantStatus.overdue
-        ? '${plant.daysUntilWatering.abs()}일 지남'
-        : plant.status == PlantStatus.today
-        ? '오늘 해야 해요'
-        : '곧 체크 권장';
+    final title = l10n.actionTileTitle(plant.status == PlantStatus.soon);
+    final subtitle = l10n.actionTileSubtitle(
+      plant.status,
+      plant.daysUntilWatering,
+    );
     final icon = switch (plant.status) {
       PlantStatus.overdue => Icons.health_and_safety_rounded,
       PlantStatus.today => Icons.water_drop_rounded,
@@ -5558,14 +5597,14 @@ class _HomeSoonPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '곧 할 일',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          Text(
+            context.l10n.soonTasksTitle,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
-          const Text(
-            '하루 이틀 안에 체크하면 좋은 식물만 모아두었어요.',
-            style: TextStyle(color: Colors.black54, height: 1.4),
+          Text(
+            context.l10n.soonTasksHint,
+            style: const TextStyle(color: Colors.black54, height: 1.4),
           ),
           const SizedBox(height: 14),
           ..._withGaps(
@@ -5590,6 +5629,7 @@ class _HomeCalmPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -5599,9 +5639,9 @@ class _HomeCalmPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '루틴이 안정적이에요',
-            style: TextStyle(
+          Text(
+            l10n.routineStableTitle,
+            style: const TextStyle(
               color: Color(0xFF234F29),
               fontSize: 22,
               fontWeight: FontWeight.w800,
@@ -5609,7 +5649,7 @@ class _HomeCalmPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '현재 $healthyCount개의 식물이 안정 상태예요. 오늘은 가볍게 둘러보면 됩니다.',
+            l10n.stableRoutineBody(healthyCount),
             style: const TextStyle(color: Color(0xFF4C6351), height: 1.45),
           ),
         ],
@@ -5657,10 +5697,7 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final sortedPlants = _sortPlantsByUrgency(widget.plants);
-    final presetImageByType = {
-      for (final preset in widget.presets)
-        if ((preset.imageUrl ?? '').isNotEmpty) preset.type: preset.imageUrl!,
-    };
+    final presetImageByType = _buildPresetImageByType(widget.presets);
     final locationGroups = _groupPlantEntries(
       sortedPlants,
       (plant) => plant.location.trim().isEmpty
@@ -5678,7 +5715,7 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
         for (final entry in locationGroups)
           _PlantGroupCard(
             title: entry.key,
-            subtitle: '${entry.value.length} 식물',
+            subtitle: l10n.groupedPlantsSubtitle(entry.value.length),
             plants: entry.value,
             presetImageByType: presetImageByType,
             pinnedPlantId: widget.pinnedPlantId,
@@ -5693,7 +5730,7 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
         for (final entry in typeGroups)
           _PlantGroupCard(
             title: entry.key,
-            subtitle: '${entry.value.length} 등록됨',
+            subtitle: l10n.groupedRegisteredSubtitle(entry.value.length),
             plants: entry.value,
             presetImageByType: presetImageByType,
             pinnedPlantId: widget.pinnedPlantId,
@@ -5756,8 +5793,8 @@ class _MyPlantsBrowseHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = <(_MyPlantsBrowseMode, String)>[
       (_MyPlantsBrowseMode.location, context.l10n.location),
-      (_MyPlantsBrowseMode.plant, '식물'),
-      (_MyPlantsBrowseMode.photo, '사진'),
+      (_MyPlantsBrowseMode.plant, context.l10n.plantTabLabel),
+      (_MyPlantsBrowseMode.photo, context.l10n.photoTabLabel),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5771,7 +5808,7 @@ class _MyPlantsBrowseHeader extends StatelessWidget {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                '$plantCount plants',
+                context.l10n.registeredPlantsCount(plantCount),
                 style: const TextStyle(
                   color: Color(0xFF6A8262),
                   fontWeight: FontWeight.w700,
@@ -5860,15 +5897,11 @@ class _PlantManagerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final color = _statusColor(plant.status);
-    final badge = switch (plant.status) {
-      PlantStatus.overdue => '지금 필요',
-      PlantStatus.today => '지금 필요',
-      PlantStatus.soon => '곧 필요',
-      PlantStatus.healthy => '여유 있음',
-    };
+    final badge = l10n.statusBadgeLabel(plant.status);
     final locationLabel = plant.location.trim().isEmpty
-        ? context.l10n.locationUnset
+        ? l10n.locationUnset
         : plant.location.trim();
 
     return InkWell(
@@ -5918,7 +5951,7 @@ class _PlantManagerCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '$badge${plant.status == PlantStatus.soon ? ' (${plant.daysUntilWatering}일 후)' : plant.status == PlantStatus.overdue ? ' (${plant.daysUntilWatering.abs()}일 지남)' : plant.status == PlantStatus.today ? ' (오늘)' : ''}',
+                    '$badge${l10n.statusBadgeDetail(plant.status, plant.daysUntilWatering)}',
                     style: TextStyle(
                       color: color,
                       fontWeight: FontWeight.w700,
@@ -5926,7 +5959,9 @@ class _PlantManagerCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '마지막 물주기: ${DateTime.now().difference(plant.lastWateredAt).inDays}일 전',
+                    l10n.lastWateredAgoLabel(
+                      DateTime.now().difference(plant.lastWateredAt).inDays,
+                    ),
                     style: const TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 4),
@@ -6035,8 +6070,13 @@ class _PlantGroupCard extends StatelessWidget {
               ),
               if (urgentCount > 0)
                 Tooltip(
-                  message: '지금 안정 상태가 아닌 식물 수예요. 먼저 확인하면 좋아요.',
+                  message: context.l10n.urgentTooltip,
                   triggerMode: TooltipTriggerMode.tap,
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  textStyle: const TextStyle(
+                    color: Colors.white,
+                    height: 1.35,
+                  ),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -6047,7 +6087,7 @@ class _PlantGroupCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      '체크 $urgentCount개',
+                      context.l10n.urgentCountLabel(urgentCount),
                       style: const TextStyle(
                         color: Color(0xFFD95C45),
                         fontWeight: FontWeight.w700,
@@ -6083,7 +6123,7 @@ class _PlantGroupCard extends StatelessWidget {
                             ? const Color(0xFFD95C45)
                             : const Color(0xFF8DA08E),
                       ),
-                      tooltip: '홈에 표시',
+                      tooltip: context.l10n.home,
                     ),
                     Expanded(
                       child: InkWell(
@@ -6102,7 +6142,7 @@ class _PlantGroupCard extends StatelessWidget {
                       onPressed: () => onEditPlant(plant),
                       visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.edit_rounded, size: 18),
-                      tooltip: '수정',
+                      tooltip: context.l10n.edit,
                     ),
                   ],
                 ),
@@ -6204,7 +6244,10 @@ class _GroupPhotoStrip extends StatelessWidget {
     }) {
       return _GroupPreviewTile(
         item: item,
-        presetImageUrl: presetImageByType[item.plant.type],
+        presetImageUrl: _plantPresetImageUrl(
+          presetImageByType,
+          item.plant,
+        ),
         borderRadius: radius,
         hiddenCount: isLastVisible ? hiddenCount : 0,
         onTap: () {
@@ -6547,8 +6590,10 @@ class _MyPlantPhotoViewerPageState extends State<_MyPlantPhotoViewerPage> {
             },
             itemBuilder: (context, index) {
               final previewItem = _items[index];
-              final presetImageUrl =
-                  widget.presetImageByType[previewItem.plant.type];
+              final presetImageUrl = _plantPresetImageUrl(
+                widget.presetImageByType,
+                previewItem.plant,
+              );
               final previewAssetIds = _galleryAssetIds(previewItem.plant);
               final previewSelectedIndex = _selectedPhotoIndex(previewItem.plant);
               final previewAssetId = previewAssetIds.isEmpty
@@ -7052,13 +7097,13 @@ class _PlantPhotoFeedCard extends StatelessWidget {
                         ? const Color(0xFFD95C45)
                         : const Color(0xFF8DA08E),
                   ),
-                  tooltip: '홈에 표시',
+                  tooltip: l10n.home,
                 ),
                 IconButton(
                   onPressed: onEdit,
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.edit_rounded),
-                  tooltip: '수정',
+                  tooltip: l10n.edit,
                 ),
                 const Icon(Icons.chevron_right_rounded),
               ],
@@ -7126,6 +7171,80 @@ String _dateLabel(DateTime date) {
   return AppLocalizations.forLocale(
     WidgetsBinding.instance.platformDispatcher.locale,
   ).dateLabel(date);
+}
+
+String _normalizePlantTypeKey(String value) {
+  return value.trim().toLowerCase();
+}
+
+Map<String, String> _buildPresetImageByType(List<PlantPreset> presets) {
+  final entries = <PlantPreset>[
+    ...kPlantPresets,
+    ...presets,
+  ];
+  final imageByType = <String, String>{};
+  for (final preset in entries) {
+    final imageUrl = (preset.imageUrl ?? '').trim();
+    if (imageUrl.isEmpty) {
+      continue;
+    }
+    final candidateTypes = <String>{
+      preset.type,
+      ...preset.aliases,
+    };
+    for (final candidate in candidateTypes) {
+      final rawType = candidate.trim();
+      if (rawType.isEmpty) {
+        continue;
+      }
+      imageByType[rawType] = imageUrl;
+      final normalizedType = _normalizePlantTypeKey(rawType);
+      if (normalizedType.isNotEmpty) {
+        imageByType[normalizedType] = imageUrl;
+      }
+    }
+  }
+  return imageByType;
+}
+
+String? _presetImageUrl(
+  Map<String, String> presetImageByType,
+  String plantType,
+) {
+  final rawType = plantType.trim();
+  if (rawType.isEmpty) {
+    return null;
+  }
+  return presetImageByType[rawType] ??
+      presetImageByType[_normalizePlantTypeKey(rawType)];
+}
+
+String? _plantPresetImageUrl(
+  Map<String, String> presetImageByType,
+  PlantItem plant,
+) {
+  final savedImageUrl = (plant.presetImageUrl ?? '').trim();
+  if (savedImageUrl.isNotEmpty) {
+    return savedImageUrl;
+  }
+  return _presetImageUrl(presetImageByType, plant.type);
+}
+
+bool _applyPresetImagesToPlants(
+  List<PlantItem> plants,
+  List<PlantPreset> presets,
+) {
+  final presetImageByType = _buildPresetImageByType(presets);
+  var updated = false;
+  for (final plant in plants) {
+    final resolvedImageUrl = _presetImageUrl(presetImageByType, plant.type);
+    if ((plant.presetImageUrl ?? '').trim().isEmpty &&
+        (resolvedImageUrl ?? '').isNotEmpty) {
+      plant.presetImageUrl = resolvedImageUrl;
+      updated = true;
+    }
+  }
+  return updated;
 }
 
 List<PlantItem> _sortPlantsByUrgency(List<PlantItem> plants) {

@@ -61,7 +61,7 @@ class PlantPhotoThumb extends StatelessWidget {
   }
 
   Widget _fallback() {
-    final iconSize = (width < height ? width : height) * 0.38;
+    final logoSize = (width < height ? width : height) * 0.72;
     return Container(
       width: width,
       height: height,
@@ -70,17 +70,15 @@ class PlantPhotoThumb extends StatelessWidget {
         borderRadius: BorderRadius.circular(borderRadius),
       ),
       child: Center(
-        child: Container(
-          width: iconSize * 1.7,
-          height: iconSize * 1.7,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.78),
-            borderRadius: BorderRadius.circular(iconSize),
-          ),
-          child: Icon(
-            Icons.local_florist,
-            color: const Color(0xFF2F855A),
-            size: iconSize,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(borderRadius * 0.72),
+          child: SizedBox(
+            width: logoSize,
+            height: logoSize,
+            child: Image.asset(
+              'assets/branding/app_logo.png',
+              fit: BoxFit.cover,
+            ),
           ),
         ),
       ),

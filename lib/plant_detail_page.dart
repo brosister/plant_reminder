@@ -88,14 +88,18 @@ class PlantDetailPage extends StatelessWidget {
               ),
             )
           else
-            Container(
-              height: 200,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Center(
-                child: Text(l10n.noPlantPhoto, style: const TextStyle(color: Colors.black54)),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: SizedBox(
+                height: 220,
+                child: (plant.presetImageUrl ?? '').trim().isNotEmpty
+                    ? Image.network(
+                        plant.presetImageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const _PlantDetailFallbackImage(),
+                      )
+                    : const _PlantDetailFallbackImage(),
               ),
             ),
           const SizedBox(height: 20),
@@ -194,6 +198,36 @@ class PlantPhotoGalleryPage extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _PlantDetailFallbackImage extends StatelessWidget {
+  const _PlantDetailFallbackImage();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFD7E2D2), Color(0xFF87A184)],
+        ),
+      ),
+      child: Center(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: SizedBox(
+            width: 118,
+            height: 118,
+            child: Image.asset(
+              'assets/branding/app_logo.png',
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
       ),
     );
   }
