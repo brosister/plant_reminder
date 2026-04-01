@@ -38,6 +38,7 @@ class AppLocalizations {
   }
 
   String get _code => _resolveLocale(locale).languageCode;
+  String get languageCode => _code;
 
   String _text(String key) => _localizedValues[_code]?[key] ?? _localizedValues['en']![key] ?? key;
 
@@ -50,6 +51,7 @@ class AppLocalizations {
       'stats': '통계',
       'settings': '설정',
       'edit': '수정',
+      'delete': '삭제',
       'close': '닫기',
       'account': '계정',
       'notification': '알림',
@@ -67,6 +69,8 @@ class AppLocalizations {
       'useWateringNotificationHint': '등록한 식물의 다음 물주기 시점에 로컬 알림을 보냅니다.',
       'defaultNotificationTime': '기본 알림 시간',
       'tapToChangeReminderTime': '눌러서 알림 시간을 변경할 수 있어요.',
+      'notificationPermissionDenied': '알림 권한이 허용되지 않아 알림 사용이 꺼졌어요.',
+      'notificationPermissionRequired': '알림을 켜려면 기기 알림 권한이 필요합니다.',
       'firebasePush': 'Firebase 공지 푸시',
       'firebasePushHint': 'Firebase 세팅 후 연결 예정',
       'remindAdmin': '리마인드 어드민',
@@ -138,6 +142,16 @@ class AppLocalizations {
       'basicInfoHint': '식물 종류와 이름, 위치를 먼저 정리해둘게요.',
       'searchPlantType': '식물 종류 검색',
       'searchPlantTypeHint': '식물 이름을 입력하면 바로 선택할 수 있어요',
+      'choosePlantType': '식물 종류 선택',
+      'choosePlantTypeHint': '눌러서 프리셋을 검색하거나 직접 등록할 수 있어요.',
+      'noPlantTypeSelected': '아직 선택한 식물 종류가 없어요.',
+      'noPlantTypeSelectedHint': '검색 팝업에서 프리셋을 고르거나 수동 등록으로 직접 입력해보세요.',
+      'searchPlantPresetTitle': '식물 종류 찾기',
+      'searchPlantPresetHint': '식물 이름으로 프리셋을 검색해보세요.',
+      'manualRegisterPlantType': '직접 입력으로 등록',
+      'registeredPresetMissing': '등록된 프리셋이 없어요.',
+      'sunlightUnknown': '햇빛 정보 없음',
+      'presetTipMissing': '기본 관리 팁 없음',
       'myPlantName': '나의 식물 이름',
       'myPlantNameExample': '예: 거실 몬스테라',
       'locationExample': '예: 거실 창가',
@@ -154,6 +168,11 @@ class AppLocalizations {
       'locationUnset': '위치 미입력',
       'saveChanges': '수정 내용 저장',
       'registerPlant': '식물 등록하기',
+      'plantAddedToast': '식물을 등록했어요.',
+      'plantUpdatedToast': '식물 정보를 수정했어요.',
+      'plantDeletedToast': '식물을 삭제했어요.',
+      'deletePlant': '식물 삭제',
+      'deletePlantConfirm': '이 식물을 목록에서 삭제할까요?',
       'overdueRecommend': '일 지났어요. 지금 물주기를 권장합니다.',
       'todayWateringTurn': '오늘 물줄 차례입니다. 체크 후 다음 일정이 자동 계산됩니다.',
       'afterDays': '일 후',
@@ -193,6 +212,18 @@ class AppLocalizations {
       'statsSubtitle': '식물 관리 흐름을 숫자로 빠르게 확인하세요.',
       'allPlants': '전체',
       'statusFilterGuide': '상태별로 골라보며 경고 강도를 확인할 수 있어요.',
+      'repotDone': '분갈이 했어요',
+      'recentActionChart': '최근 액션 차트',
+      'recentActionChartEmpty': '아직 기록된 식물이 없어요.',
+      'recentActionChartHint': '최근 기록된 액션 흐름을 한눈에 볼 수 있게 정리했어요.',
+      'totalShort': '전체',
+      'todayShort': '오늘',
+      'riskShort': '위험',
+      'relaxedShort': '여유',
+      'averageCycleShort': '평균 주기',
+      'timelineEmpty': '타임라인에 표시할 활동이 없습니다.',
+      'actionTime': '액션 시각',
+      'detail': '세부 내용',
     },
     'en': {
       'appTitle': 'Plant Reminder',
@@ -202,6 +233,7 @@ class AppLocalizations {
       'stats': 'Stats',
       'settings': 'Settings',
       'edit': 'Edit',
+      'delete': 'Delete',
       'close': 'Close',
       'account': 'Account',
       'notification': 'Notifications',
@@ -219,6 +251,8 @@ class AppLocalizations {
       'useWateringNotificationHint': 'Send a local reminder when a registered plant reaches its next watering time.',
       'defaultNotificationTime': 'Default reminder time',
       'tapToChangeReminderTime': 'Tap to change the reminder time.',
+      'notificationPermissionDenied': 'Notification permission was not granted, so reminders were turned off.',
+      'notificationPermissionRequired': 'Device notification permission is required to turn reminders on.',
       'firebasePush': 'Firebase notice push',
       'firebasePushHint': 'Will be connected after Firebase setup',
       'remindAdmin': 'Reminder Admin',
@@ -290,6 +324,16 @@ class AppLocalizations {
       'basicInfoHint': 'Let\'s start with the type, name, and location.',
       'searchPlantType': 'Search plant type',
       'searchPlantTypeHint': 'Type a plant name to select it instantly',
+      'choosePlantType': 'Choose plant type',
+      'choosePlantTypeHint': 'Tap to search presets or register one manually.',
+      'noPlantTypeSelected': 'No plant type selected yet.',
+      'noPlantTypeSelectedHint': 'Pick a preset from search or register it manually.',
+      'searchPlantPresetTitle': 'Find plant type',
+      'searchPlantPresetHint': 'Search presets by plant name.',
+      'manualRegisterPlantType': 'Register typed keyword',
+      'registeredPresetMissing': 'No registered preset was found.',
+      'sunlightUnknown': 'No sunlight info',
+      'presetTipMissing': 'No default care tip',
       'myPlantName': 'My plant name',
       'myPlantNameExample': 'e.g. Living room Monstera',
       'locationExample': 'e.g. Living room window',
@@ -306,6 +350,11 @@ class AppLocalizations {
       'locationUnset': 'No location entered',
       'saveChanges': 'Save changes',
       'registerPlant': 'Add plant',
+      'plantAddedToast': 'Plant added.',
+      'plantUpdatedToast': 'Plant details updated.',
+      'plantDeletedToast': 'Plant deleted.',
+      'deletePlant': 'Delete plant',
+      'deletePlantConfirm': 'Remove this plant from the list?',
       'overdueRecommend': 'days overdue. Watering is recommended now.',
       'todayWateringTurn': 'It is scheduled for watering today. Check it and the next schedule will update automatically.',
       'afterDays': 'days left',
@@ -345,6 +394,18 @@ class AppLocalizations {
       'statsSubtitle': 'See your plant care flow in numbers.',
       'allPlants': 'All',
       'statusFilterGuide': 'Filter by status to compare each warning level.',
+      'repotDone': 'Repotted',
+      'recentActionChart': 'Recent action chart',
+      'recentActionChartEmpty': 'There are no recorded plants yet.',
+      'recentActionChartHint': 'This summarizes your recent action flow at a glance.',
+      'totalShort': 'Total',
+      'todayShort': 'Today',
+      'riskShort': 'Risk',
+      'relaxedShort': 'Relaxed',
+      'averageCycleShort': 'Avg cycle',
+      'timelineEmpty': 'There are no activities to show on the timeline.',
+      'actionTime': 'Action time',
+      'detail': 'Details',
     },
     'ja': {
       'appTitle': '植物みずやりリマインダー',
@@ -354,6 +415,7 @@ class AppLocalizations {
       'stats': '統計',
       'settings': '設定',
       'edit': '編集',
+      'delete': '削除',
       'close': '閉じる',
       'account': 'アカウント',
       'notification': '通知',
@@ -371,6 +433,8 @@ class AppLocalizations {
       'useWateringNotificationHint': '登録した植物の次の水やり時間にローカル通知を送ります。',
       'defaultNotificationTime': '基本通知時間',
       'tapToChangeReminderTime': 'タップして通知時間を変更できます。',
+      'notificationPermissionDenied': '通知権限が許可されていないため、通知の使用をオフにしました。',
+      'notificationPermissionRequired': '通知を有効にするには端末の通知権限が必要です。',
       'firebasePush': 'Firebase お知らせプッシュ',
       'firebasePushHint': 'Firebase設定後に連携予定',
       'remindAdmin': 'リマインド管理',
@@ -396,6 +460,16 @@ class AppLocalizations {
       'noPlantPhoto': '登録された植物写真がありません。',
       'basicInfo': '基本情報',
       'plantType': '植物の種類',
+      'choosePlantType': '植物の種類を選択',
+      'choosePlantTypeHint': 'タップしてプリセットを検索するか、直接登録できます。',
+      'noPlantTypeSelected': 'まだ植物の種類が選択されていません。',
+      'noPlantTypeSelectedHint': '検索ポップアップでプリセットを選ぶか、手動登録で直接入力してください。',
+      'searchPlantPresetTitle': '植物の種類を探す',
+      'searchPlantPresetHint': '植物名でプリセットを検索してください。',
+      'manualRegisterPlantType': '直接入力で登録',
+      'registeredPresetMissing': '登録されたプリセットがありません。',
+      'sunlightUnknown': '日当たり情報なし',
+      'presetTipMissing': '基本管理のヒントなし',
       'location': '場所',
       'sunlight': '日当たり',
       'wateringCycle': '水やり周期',
@@ -412,6 +486,18 @@ class AppLocalizations {
       'statsSubtitle': '植物管理の流れを数字ですばやく確認できます。',
       'allPlants': 'すべて',
       'statusFilterGuide': '状態ごとに見比べながら警告の強さを確認できます。',
+      'repotDone': '植え替えしました',
+      'recentActionChart': '最近のアクションチャート',
+      'recentActionChartEmpty': 'まだ記録された植物がありません。',
+      'recentActionChartHint': '最近記録したアクションの流れをひと目で見られるように整理しました。',
+      'totalShort': '全体',
+      'todayShort': '今日',
+      'riskShort': '注意',
+      'relaxedShort': '余裕',
+      'averageCycleShort': '平均周期',
+      'timelineEmpty': 'タイムラインに表示するアクティビティがありません。',
+      'actionTime': '操作時刻',
+      'detail': '詳細',
       'syncChoiceTitle': '両方にデータがあります',
       'syncChoiceBody': 'この端末にも植物データがあり、サーバーにも保存済みデータがあります。どの基準で合わせるか選んでください。',
       'syncUseServer': 'サーバーデータを読み込む',
@@ -427,6 +513,11 @@ class AppLocalizations {
       'syncMerged': '端末とサーバーのデータを統合しました。',
       'syncFailed': '同期中にエラーが発生しました。',
       'cloudLinked': 'アカウント連携とクラウド保存を使用中',
+      'plantAddedToast': '植物を登録しました。',
+      'plantUpdatedToast': '植物情報を更新しました。',
+      'plantDeletedToast': '植物を削除しました。',
+      'deletePlant': '植物を削除',
+      'deletePlantConfirm': 'この植物を一覧から削除しますか？',
       'privacyDialogTitle': 'プライバシーポリシー',
       'privacyDialogBody': '植物みずやりリマインダーは、植物記録と通知機能を提供するために必要最小限の情報のみを使用します。\n\n主に保存される情報:\n- 登録した植物名、場所、メモ、水やり周期\n- ユーザーが選択した植物写真\n- 通知設定情報\n\n広告は Google AdMob のポリシーに従い、詳細は Google のプライバシーポリシーに準拠します。\n\nサービス運営中にデータ利用やポリシー内容が変更される場合があり、重要な変更はアプリ内通知やアップデートで案内されます。',
     },
@@ -438,6 +529,7 @@ class AppLocalizations {
       'stats': '统计',
       'settings': '设置',
       'edit': '编辑',
+      'delete': '删除',
       'close': '关闭',
       'account': '账号',
       'notification': '通知',
@@ -455,6 +547,8 @@ class AppLocalizations {
       'useWateringNotificationHint': '当已登记植物到达下次浇水时间时发送本地通知。',
       'defaultNotificationTime': '默认提醒时间',
       'tapToChangeReminderTime': '点击即可修改提醒时间。',
+      'notificationPermissionDenied': '由于未授予通知权限，提醒已被关闭。',
+      'notificationPermissionRequired': '要开启提醒，需要设备通知权限。',
       'firebasePush': 'Firebase 公告推送',
       'firebasePushHint': '完成 Firebase 设置后连接',
       'remindAdmin': '提醒管理后台',
@@ -480,6 +574,16 @@ class AppLocalizations {
       'noPlantPhoto': '没有已登记的植物照片。',
       'basicInfo': '基本信息',
       'plantType': '植物种类',
+      'choosePlantType': '选择植物种类',
+      'choosePlantTypeHint': '点击后可搜索预设，或直接手动登记。',
+      'noPlantTypeSelected': '尚未选择植物种类。',
+      'noPlantTypeSelectedHint': '请在搜索弹窗中选择预设，或用手动登记直接输入。',
+      'searchPlantPresetTitle': '查找植物种类',
+      'searchPlantPresetHint': '用植物名称搜索预设。',
+      'manualRegisterPlantType': '手动输入登记',
+      'registeredPresetMissing': '没有找到已登记的预设。',
+      'sunlightUnknown': '没有光照信息',
+      'presetTipMissing': '没有默认养护提示',
       'location': '位置',
       'sunlight': '光照建议',
       'wateringCycle': '浇水周期',
@@ -496,6 +600,18 @@ class AppLocalizations {
       'statsSubtitle': '用数字快速查看植物护理情况。',
       'allPlants': '全部',
       'statusFilterGuide': '可以按状态筛选，快速比较提醒强度。',
+      'repotDone': '已换盆',
+      'recentActionChart': '最近操作图表',
+      'recentActionChartEmpty': '还没有记录的植物。',
+      'recentActionChartHint': '这里会把最近记录的操作流程一目了然地整理出来。',
+      'totalShort': '全部',
+      'todayShort': '今天',
+      'riskShort': '风险',
+      'relaxedShort': '轻松',
+      'averageCycleShort': '平均周期',
+      'timelineEmpty': '时间线中没有可显示的活动。',
+      'actionTime': '操作时间',
+      'detail': '详细内容',
       'syncChoiceTitle': '两边都有数据',
       'syncChoiceBody': '当前设备已有植物数据，服务器中也有已保存的数据。请选择如何处理。',
       'syncUseServer': '加载服务器数据',
@@ -511,6 +627,11 @@ class AppLocalizations {
       'syncMerged': '已合并设备与服务器数据。',
       'syncFailed': '同步时发生错误。',
       'cloudLinked': '已启用账号关联与云端保存',
+      'plantAddedToast': '植物已添加。',
+      'plantUpdatedToast': '植物信息已更新。',
+      'plantDeletedToast': '植物已删除。',
+      'deletePlant': '删除植物',
+      'deletePlantConfirm': '要将这株植物从列表中删除吗？',
       'privacyDialogTitle': '隐私政策',
       'privacyDialogBody': '植物浇水提醒仅使用提供植物记录和提醒功能所需的最少信息。\n\n主要保存的信息：\n- 已登记植物的名称、位置、备注和浇水周期\n- 用户自行选择的植物照片\n- 提醒设置\n\n广告遵循 Google AdMob 政策，相关内容适用 Google 隐私政策。\n\n在服务运营过程中，数据使用方式和政策内容可能会变更。若有重要变更，将通过应用内公告或更新进行说明。',
     },
@@ -523,6 +644,7 @@ class AppLocalizations {
   String get stats => _text('stats');
   String get settings => _text('settings');
   String get edit => _text('edit');
+  String get delete => _text('delete');
   String get close => _text('close');
   String get account => _text('account');
   String get notification => _text('notification');
@@ -540,6 +662,8 @@ class AppLocalizations {
   String get useWateringNotificationHint => _text('useWateringNotificationHint');
   String get defaultNotificationTime => _text('defaultNotificationTime');
   String get tapToChangeReminderTime => _text('tapToChangeReminderTime');
+  String get notificationPermissionDenied => _text('notificationPermissionDenied');
+  String get notificationPermissionRequired => _text('notificationPermissionRequired');
   String get firebasePush => _text('firebasePush');
   String get firebasePushHint => _text('firebasePushHint');
   String get remindAdmin => _text('remindAdmin');
@@ -581,6 +705,18 @@ class AppLocalizations {
   String get statsSubtitle => _text('statsSubtitle');
   String get allPlants => _text('allPlants');
   String get statusFilterGuide => _text('statusFilterGuide');
+  String get repotDone => _text('repotDone');
+  String get recentActionChart => _text('recentActionChart');
+  String get recentActionChartEmpty => _text('recentActionChartEmpty');
+  String get recentActionChartHint => _text('recentActionChartHint');
+  String get totalShort => _text('totalShort');
+  String get todayShort => _text('todayShort');
+  String get riskShort => _text('riskShort');
+  String get relaxedShort => _text('relaxedShort');
+  String get averageCycleShort => _text('averageCycleShort');
+  String get timelineEmpty => _text('timelineEmpty');
+  String get actionTime => _text('actionTime');
+  String get detail => _text('detail');
   String get todayRoutine => _text('todayRoutine');
   String get todayCareRelaxed => _text('todayCareRelaxed');
   String get todayTasks => _text('todayTasks');
@@ -617,6 +753,16 @@ class AppLocalizations {
   String get basicInfoHint => _text('basicInfoHint');
   String get searchPlantType => _text('searchPlantType');
   String get searchPlantTypeHint => _text('searchPlantTypeHint');
+  String get choosePlantType => _text('choosePlantType');
+  String get choosePlantTypeHint => _text('choosePlantTypeHint');
+  String get noPlantTypeSelected => _text('noPlantTypeSelected');
+  String get noPlantTypeSelectedHint => _text('noPlantTypeSelectedHint');
+  String get searchPlantPresetTitle => _text('searchPlantPresetTitle');
+  String get searchPlantPresetHint => _text('searchPlantPresetHint');
+  String get manualRegisterPlantType => _text('manualRegisterPlantType');
+  String get registeredPresetMissing => _text('registeredPresetMissing');
+  String get sunlightUnknown => _text('sunlightUnknown');
+  String get presetTipMissing => _text('presetTipMissing');
   String get myPlantName => _text('myPlantName');
   String get myPlantNameExample => _text('myPlantNameExample');
   String get locationExample => _text('locationExample');
@@ -633,6 +779,11 @@ class AppLocalizations {
   String get locationUnset => _text('locationUnset');
   String get saveChanges => _text('saveChanges');
   String get registerPlant => _text('registerPlant');
+  String get plantAddedToast => _text('plantAddedToast');
+  String get plantUpdatedToast => _text('plantUpdatedToast');
+  String get plantDeletedToast => _text('plantDeletedToast');
+  String get deletePlant => _text('deletePlant');
+  String get deletePlantConfirm => _text('deletePlantConfirm');
   String get todayWateringTurn => _text('todayWateringTurn');
   String get nextDatePrefix => _text('nextDatePrefix');
   String get healthy => _text('healthy');
@@ -687,6 +838,8 @@ class AppLocalizations {
   String defaultCycleDaysLabel(int days) => _code == 'ko' ? '$days일 기본 주기' : _code == 'ja' ? '$days日基本周期' : _code == 'zh' ? '$days 天默认周期' : '$days d default';
   String selectedPhotoCount(int count) => _code == 'ko' ? '$count장 선택' : _code == 'ja' ? '$count枚選択' : _code == 'zh' ? '已选 $count 张' : '$count selected';
   String wateredToast(String plantName) => _code == 'ko' ? '$plantName 물주기 완료' : _code == 'ja' ? '$plantName の水やり完了' : _code == 'zh' ? '$plantName 浇水完成' : '$plantName watering completed';
+  String repottedToast(String plantName) => _code == 'ko' ? '$plantName 분갈이 기록을 남겼어요.' : _code == 'ja' ? '$plantName の植え替え記録を残しました。' : _code == 'zh' ? '已记录 $plantName 的换盆。' : 'Saved a repotting record for $plantName.';
+  String bulkTasksDoneToast(int count) => _code == 'ko' ? '과제 $count개를 처리했어요' : _code == 'ja' ? '$count件のタスクを処理しました' : _code == 'zh' ? '已处理 $count 个任务' : 'Completed $count tasks.';
   String loginSuccessToast(String provider) => _code == 'ko' ? '$provider $loginSuccess' : _code == 'ja' ? '$provider $loginSuccess' : _code == 'zh' ? '$provider$loginSuccess' : '$provider $loginSuccess';
   String noLocationEnteredFallback() => locationUnset;
   String nextDateLabel(DateTime date) => _code == 'ko' ? '다음 ${dateLabel(date)}' : _code == 'ja' ? '次回 ${dateLabel(date)}' : _code == 'zh' ? '下次 ${dateLabel(date)}' : 'Next ${dateLabel(date)}';
@@ -694,7 +847,71 @@ class AppLocalizations {
   String afterDaysLabel(int days, String location) => _code == 'ko' ? '$days일 후 · $location' : _code == 'ja' ? '$days日後 · $location' : _code == 'zh' ? '$days 天后 · $location' : 'In $days d · $location';
   String photoIndexLabel(int current, int total) => _code == 'ko' ? '사진 $current/$total' : _code == 'ja' ? '写真 $current/$total' : _code == 'zh' ? '照片 $current/$total' : 'Photo $current/$total';
   String reminderTitle(String plantName) => _code == 'ko' ? '$plantName 물줄 시간' : _code == 'ja' ? '$plantName の水やり時間' : _code == 'zh' ? '$plantName 的浇水时间' : 'Time to water $plantName';
-  String reminderBody(String plantType) => _code == 'ko' ? '$plantType 물주기 확인이 필요해요.' : _code == 'ja' ? '$plantType の水やり確認が必要です。' : _code == 'zh' ? '$plantType 需要检查是否该浇水了。' : '$plantType needs a watering check.';
+  String reminderBody(String plantType, String location, int cycleDays) => _code == 'ko'
+      ? '${location.trim().isEmpty ? locationUnset : location} · $cycleDays일 주기\n$plantType 물주기 확인이 필요해요. 지금 처리하면 다음 일정이 자동으로 갱신돼요.'
+      : _code == 'ja'
+      ? '${location.trim().isEmpty ? locationUnset : location} · $cycleDays日周期\n$plantType の水やり確認が必要です。今対応すると次の予定が自動で更新されます。'
+      : _code == 'zh'
+      ? '${location.trim().isEmpty ? locationUnset : location} · $cycleDays天周期\n$plantType 需要浇水确认。现在处理的话，下次日程会自动更新。'
+      : '${location.trim().isEmpty ? locationUnset : location} · Every $cycleDays d\n$plantType needs a watering check. Handle it now and the next schedule will update automatically.';
+  String statusCheckReminderTitle(String plantName) => _code == 'ko'
+      ? '$plantName 상태 체크'
+      : _code == 'ja'
+      ? '$plantName の状態チェック'
+      : _code == 'zh'
+      ? '$plantName 状态检查'
+      : 'Check on $plantName';
+  String statusCheckReminderBody(String plantType, String location) => _code == 'ko'
+      ? '${location.trim().isEmpty ? locationUnset : location}\n내일 물줄 가능성이 있어요. 오늘 잎 상태와 흙 마름 정도를 가볍게 확인해보세요.'
+      : _code == 'ja'
+      ? '${location.trim().isEmpty ? locationUnset : location}\n明日水やりの可能性があります。今日のうちに葉の状態と土の乾き具合を軽く確認してみましょう。'
+      : _code == 'zh'
+      ? '${location.trim().isEmpty ? locationUnset : location}\n明天可能需要浇水。今天先简单检查一下叶片状态和土壤干燥程度。'
+      : '${location.trim().isEmpty ? locationUnset : location}\nIt may need water tomorrow. Check the leaves and soil moisture today.';
+  String get sendTestNotification => _code == 'ko'
+      ? '잠금화면 테스트 알림 보내기'
+      : _code == 'ja'
+      ? 'ロック画面テスト通知を送信'
+      : _code == 'zh'
+      ? '发送锁屏测试通知'
+      : 'Send lock screen test notification';
+  String get sendTestNotificationHint => _code == 'ko'
+      ? '누르면 잠금화면 미리보기용 알림이 바로 표시됩니다.'
+      : _code == 'ja'
+      ? '押すとロック画面プレビュー用の通知がすぐ表示されます。'
+      : _code == 'zh'
+      ? '点击后会立即显示用于锁屏预览的通知。'
+      : 'Tap to show a lock screen preview notification immediately.';
+  String get testNotificationScheduled => _code == 'ko'
+      ? '테스트 알림을 바로 표시했어요. 지금 화면을 잠가서 잠금화면 노출을 확인해보세요.'
+      : _code == 'ja'
+      ? 'テスト通知をすぐ表示しました。画面をロックして表示を確認してください。'
+      : _code == 'zh'
+      ? '测试通知已立即显示。请锁屏后确认显示效果。'
+      : 'The test alert was shown immediately. Lock the screen now to verify it.';
+  String presetSearchResultCount(int count) => _code == 'ko'
+      ? '검색 결과 $count개'
+      : _code == 'ja'
+      ? '検索結果 $count件'
+      : _code == 'zh'
+      ? '搜索结果 $count 条'
+      : '$count results';
+  String noPresetFoundForKeyword(String query) => _code == 'ko'
+      ? '"$query"에 맞는 프리셋이 없어요.'
+      : _code == 'ja'
+      ? '"$query" に一致するプリセットがありません。'
+      : _code == 'zh'
+      ? '没有找到与“$query”匹配的预设。'
+      : 'No preset matched "$query".';
+  String registerTypedKeyword(String query) => _code == 'ko'
+      ? '"$query"로 직접 등록'
+      : _code == 'ja'
+      ? '"$query" を直接登録'
+      : _code == 'zh'
+      ? '用“$query”直接登记'
+      : 'Register "$query"';
+  String activityCountProgress(int current, int total) => _code == 'ko' ? '$current/$total개 표시 중' : _code == 'ja' ? '$current/$total件を表示中' : _code == 'zh' ? '正在显示 $current/$total 条' : 'Showing $current/$total';
+  String photoPositionLabel(int current, int total) => _code == 'ko' ? '사진 $current/$total' : _code == 'ja' ? '写真 $current/$total' : _code == 'zh' ? '照片 $current/$total' : 'Photo $current/$total';
   String reminderChannelDescription() => _code == 'ko' ? '식물 물주기 알림 채널' : _code == 'ja' ? '植物水やり通知チャンネル' : _code == 'zh' ? '植物浇水提醒频道' : 'Plant watering reminder channel';
   String monthLabel(DateTime date) => _code == 'ko' ? '${date.year}년 ${date.month}월' : _code == 'ja' ? '${date.year}年${date.month}月' : _code == 'zh' ? '${date.year}年${date.month}月' : '${_englishMonths[date.month - 1]} ${date.year}';
   String dateLabel(DateTime date) => _code == 'ko' || _code == 'ja' || _code == 'zh'

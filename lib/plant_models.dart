@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 enum PlantStatus { healthy, soon, today, overdue }
+enum PlantActivityType { registered, watered, repotted, moved, updated, deleted }
 
 const String _plantReminderBaseUrl = 'https://app-master.officialsite.kr';
 
@@ -91,6 +92,63 @@ class PlantItem {
     final decoded = jsonDecode(raw) as List<dynamic>;
     return decoded
         .map((e) => PlantItem.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+}
+
+class PlantActivityEntry {
+  const PlantActivityEntry({
+    required this.id,
+    required this.plantId,
+    required this.plantName,
+    required this.plantType,
+    required this.location,
+    required this.type,
+    required this.occurredAt,
+    this.detail,
+  });
+
+  final String id;
+  final String plantId;
+  final String plantName;
+  final String plantType;
+  final String location;
+  final PlantActivityType type;
+  final DateTime occurredAt;
+  final String? detail;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'plantId': plantId,
+        'plantName': plantName,
+        'plantType': plantType,
+        'location': location,
+        'type': type.name,
+        'occurredAt': occurredAt.toIso8601String(),
+        'detail': detail,
+      };
+
+  factory PlantActivityEntry.fromJson(Map<String, dynamic> json) => PlantActivityEntry(
+        id: json['id'] as String,
+        plantId: json['plantId'] as String,
+        plantName: json['plantName'] as String,
+        plantType: json['plantType'] as String? ?? '',
+        location: json['location'] as String? ?? '',
+        type: PlantActivityType.values.firstWhere(
+          (value) => value.name == json['type'],
+          orElse: () => PlantActivityType.updated,
+        ),
+        occurredAt: DateTime.parse(json['occurredAt'] as String),
+        detail: json['detail'] as String?,
+      );
+
+  static String encodeList(List<PlantActivityEntry> items) =>
+      jsonEncode(items.map((e) => e.toJson()).toList());
+
+  static List<PlantActivityEntry> decodeList(String raw) {
+    final decoded = jsonDecode(raw) as List<dynamic>;
+    return decoded
+        .map((e) => PlantActivityEntry.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
   }
 }

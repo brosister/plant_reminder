@@ -10,12 +10,14 @@ class PlantSyncProfile {
   const PlantSyncProfile({
     required this.exists,
     required this.plants,
+    required this.activityLog,
     required this.settings,
     this.updatedAt,
   });
 
   final bool exists;
   final List<PlantItem> plants;
+  final List<PlantActivityEntry> activityLog;
   final AppSettings settings;
   final DateTime? updatedAt;
 }
@@ -23,11 +25,13 @@ class PlantSyncProfile {
 class PlantSyncResult {
   const PlantSyncResult({
     required this.plants,
+    required this.activityLog,
     required this.settings,
     this.updatedAt,
   });
 
   final List<PlantItem> plants;
+  final List<PlantActivityEntry> activityLog;
   final AppSettings settings;
   final DateTime? updatedAt;
 }
@@ -56,6 +60,7 @@ class PlantSyncService {
     return PlantSyncProfile(
       exists: data['exists'] == true,
       plants: _decodePlants(data['plants']),
+      activityLog: _decodeActivityLog(data['activityLog'] ?? data['activities']),
       settings: _decodeSettings(data['settings']),
       updatedAt: _parseDateTime(data['updatedAt']),
     );
@@ -64,12 +69,14 @@ class PlantSyncService {
   static Future<PlantSyncResult> replaceWithLocal({
     required AppAuthUser user,
     required List<PlantItem> plants,
+    required List<PlantActivityEntry> activityLog,
     required AppSettings settings,
   }) async {
     return _postSync(
       '/api/plant-reminder/sync/replace',
       user: user,
       plants: plants,
+      activityLog: activityLog,
       settings: settings,
     );
   }
@@ -77,12 +84,14 @@ class PlantSyncService {
   static Future<PlantSyncResult> mergeWithServer({
     required AppAuthUser user,
     required List<PlantItem> localPlants,
+    required List<PlantActivityEntry> localActivityLog,
     required AppSettings localSettings,
   }) async {
     return _postSync(
       '/api/plant-reminder/sync/merge',
       user: user,
       plants: localPlants,
+      activityLog: localActivityLog,
       settings: localSettings,
     );
   }
@@ -91,6 +100,7 @@ class PlantSyncService {
     String path, {
     required AppAuthUser user,
     required List<PlantItem> plants,
+    required List<PlantActivityEntry> activityLog,
     required AppSettings settings,
   }) async {
     final response = await http.post(
@@ -104,6 +114,8 @@ class PlantSyncService {
         'profile_image_url': user.profileImageUrl,
         'app_name': _appName,
         'plants': plants.map((item) => item.toJson()).toList(),
+        'activityLog': activityLog.map((item) => item.toJson()).toList(),
+        'activities': activityLog.map((item) => item.toJson()).toList(),
         'settings': settings.toJson(),
       }),
     );
@@ -115,6 +127,9 @@ class PlantSyncService {
     final data = (body['data'] ?? {}) as Map<String, dynamic>;
     return PlantSyncResult(
       plants: _decodePlants(data['plants']),
+      activityLog: _decodeActivityLog(data['activityLog'] ?? data['activities']).isEmpty
+          ? List<PlantActivityEntry>.from(activityLog)
+          : _decodeActivityLog(data['activityLog'] ?? data['activities']),
       settings: _decodeSettings(data['settings']),
       updatedAt: _parseDateTime(data['updatedAt']),
     );
@@ -133,9 +148,23 @@ class PlantSyncService {
         notificationsEnabled: true,
         notificationHour: 9,
         notificationMinute: 0,
+        notifyDayBefore: true,
+        notifySameDay: true,
+        allowSnooze: true,
       );
     }
     return AppSettings.fromJson(Map<String, dynamic>.from(value));
+  }
+
+  static List<PlantActivityEntry> _decodeActivityLog(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .map(
+          (item) => PlantActivityEntry.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
   }
 
   static DateTime? _parseDateTime(dynamic value) {

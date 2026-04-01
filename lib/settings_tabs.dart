@@ -12,6 +12,7 @@ class SettingsDialog extends StatefulWidget {
     required this.authUser,
     required this.isSigningIn,
     required this.settings,
+    required this.onSendTestNotification,
     required this.onSignInPressed,
     required this.onSignOutPressed,
     required this.onSettingsChanged,
@@ -20,6 +21,7 @@ class SettingsDialog extends StatefulWidget {
   final AppAuthUser? authUser;
   final bool isSigningIn;
   final AppSettings settings;
+  final Future<void> Function() onSendTestNotification;
   final Future<void> Function() onSignInPressed;
   final Future<void> Function() onSignOutPressed;
   final Future<void> Function(AppSettings settings) onSettingsChanged;
@@ -107,6 +109,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     ),
                     _NotificationSettingsTab(
                       settings: _draftSettings,
+                      onSendTestNotification: widget.onSendTestNotification,
                       onSettingsChanged: _handleSettingsChanged,
                     ),
                   ],
@@ -373,10 +376,12 @@ class _AccountSettingsTab extends StatelessWidget {
 class _NotificationSettingsTab extends StatelessWidget {
   const _NotificationSettingsTab({
     required this.settings,
+    required this.onSendTestNotification,
     required this.onSettingsChanged,
   });
 
   final AppSettings settings;
+  final Future<void> Function() onSendTestNotification;
   final Future<void> Function(AppSettings settings) onSettingsChanged;
 
   @override
@@ -483,6 +488,61 @@ class _NotificationSettingsTab extends StatelessWidget {
                       color: Colors.black45,
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onSendTestNotification,
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBF2),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFF1E0A6)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF1C7),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_active_outlined,
+                    color: Color(0xFF9A6B00),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.sendTestNotification,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.sendTestNotificationHint,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Colors.black45,
                 ),
               ],
             ),

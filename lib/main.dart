@@ -1,9 +1,11 @@
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 import 'ad_service.dart';
 import 'app_localizations.dart';
@@ -22,7 +24,7 @@ import 'plant_storage_service.dart';
 import 'settings_tabs.dart';
 import 'sync_state_service.dart';
 
-const double _bottomOverlaySafePadding = 164;
+const double _baseBottomOverlayPadding = 112;
 
 void main() {
   runApp(const PlantReminderApp());
@@ -114,45 +116,17 @@ class _PlantRootPageState extends State<PlantRootPage> {
   bool _isSyncing = false;
   bool _isLoading = true;
   List<PlantPreset> _plantPresets = List<PlantPreset>.from(kPlantPresets);
+  List<PlantActivityEntry> _activityLog = [];
   AppSettings _settings = const AppSettings(
     notificationsEnabled: true,
     notificationHour: 9,
     notificationMinute: 0,
+    notifyDayBefore: true,
+    notifySameDay: true,
+    allowSnooze: true,
   );
 
-  final List<PlantItem> _plants = [
-    PlantItem(
-      id: 'p1',
-      name: '거실 몬스테라',
-      type: '몬스테라',
-      location: '거실 창가',
-      wateringCycleDays: 5,
-      lastWateredAt: DateTime.now().subtract(const Duration(days: 5)),
-      memo: '새 잎이 올라오는 중. 흙 마름 빠름.',
-      sunlight: '밝은 간접광',
-    ),
-    PlantItem(
-      id: 'p2',
-      name: '책상 스투키',
-      type: '스투키',
-      location: '작업실 책상',
-      wateringCycleDays: 14,
-      lastWateredAt: DateTime.now().subtract(const Duration(days: 9)),
-      memo: '과습 주의. 흙 완전히 마를 때 확인.',
-      sunlight: '밝은 곳',
-    ),
-    PlantItem(
-      id: 'p3',
-      name: '주방 허브',
-      type: '허브',
-      location: '주방 창문 옆',
-      wateringCycleDays: 3,
-      lastWateredAt: DateTime.now().subtract(const Duration(days: 4)),
-      memo: '잎 상태 자주 보기. 햇빛 충분히 받게 두기.',
-      sunlight: '햇빛 필요',
-      photoAssetIds: const [],
-    ),
-  ];
+  final List<PlantItem> _plants = [];
 
   @override
   void initState() {
@@ -165,6 +139,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await NotificationService.init();
     await AdService.init();
     final stored = await PlantStorageService.loadPlants();
+    final activityLog = await PlantStorageService.loadActivityLog();
     final loadedSettings = await AppSettingsService.load();
     final loadedPresets = await PlantPresetService.loadPresets();
     final savedAuthUser = await AuthSessionService.loadUser();
@@ -173,10 +148,24 @@ class _PlantRootPageState extends State<PlantRootPage> {
         ..clear()
         ..addAll(stored);
     }
+    _activityLog = activityLog;
+    if (_activityLog.isEmpty && _plants.isNotEmpty) {
+      _activityLog = _plants
+          .map(
+            (plant) => _buildActivityEntry(
+              plant: plant,
+              type: PlantActivityType.registered,
+              occurredAt: plant.lastWateredAt,
+              detail: '초기 등록 데이터',
+            ),
+          )
+          .toList();
+    }
     if (loadedPresets.isNotEmpty) {
       _plantPresets = loadedPresets;
     }
     _settings = loadedSettings;
+    await _syncNotificationPermissionState(showToast: false);
     _authUser = savedAuthUser;
     if (savedAuthUser != null) {
       await _restoreCloudDataIfNeeded(savedAuthUser);
@@ -190,6 +179,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
 
   Future<void> _persistPlants() async {
     await PlantStorageService.savePlants(_plants);
+    await PlantStorageService.saveActivityLog(_activityLog);
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     await _syncCurrentStateIfLinked();
   }
@@ -198,6 +188,32 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await AppSettingsService.save(_settings);
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     await _syncCurrentStateIfLinked();
+  }
+
+  void _appendActivity(PlantActivityEntry entry) {
+    _appendActivityToList(_activityLog, entry);
+  }
+
+  Future<void> _syncNotificationPermissionState({required bool showToast}) async {
+    final allowed = await NotificationService.areNotificationsAllowed();
+    if (!mounted) return;
+    if (allowed || !_settings.notificationsEnabled) return;
+
+    setState(() {
+      _settings = _settings.copyWith(notificationsEnabled: false);
+    });
+    await _persistSettingsOnly();
+    if (!mounted || !showToast) return;
+    _showToast(context.l10n.notificationPermissionDenied);
+  }
+
+  Future<void> _sendTestNotification() async {
+    await NotificationService.scheduleLockScreenTestNotifications(
+      _plants,
+      settings: _settings,
+    );
+    if (!mounted) return;
+    _showToast(context.l10n.testNotificationScheduled);
   }
 
   Future<void> _togglePinnedHomePlant(PlantItem plant) async {
@@ -222,6 +238,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
           final result = await PlantSyncService.replaceWithLocal(
             user: user,
             plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+            activityLog: List<PlantActivityEntry>.from(_activityLog),
             settings: _settings,
           );
           await SyncStateService.markSynced(user, result.updatedAt);
@@ -240,6 +257,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
         await _applySyncedData(
           user,
           profile.plants,
+          profile.activityLog,
           profile.settings,
           profile.updatedAt,
         );
@@ -252,14 +270,19 @@ class _PlantRootPageState extends State<PlantRootPage> {
   Future<void> _applySyncedData(
     AppAuthUser user,
     List<PlantItem> plants,
+    List<PlantActivityEntry> activityLog,
     AppSettings settings,
     DateTime? syncedAt,
   ) async {
     _plants
       ..clear()
       ..addAll(plants.map((item) => item.copy()));
+    _activityLog
+      ..clear()
+      ..addAll(activityLog);
     _settings = settings;
     await PlantStorageService.savePlants(_plants);
+    await PlantStorageService.saveActivityLog(_activityLog);
     await AppSettingsService.save(_settings);
     await NotificationService.rescheduleForPlants(_plants, settings: _settings);
     await SyncStateService.markSynced(user, syncedAt);
@@ -274,6 +297,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
       final result = await PlantSyncService.replaceWithLocal(
         user: user,
         plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+        activityLog: List<PlantActivityEntry>.from(_activityLog),
         settings: _settings,
       );
       await SyncStateService.markSynced(user, result.updatedAt);
@@ -289,13 +313,30 @@ class _PlantRootPageState extends State<PlantRootPage> {
     Fluttertoast.showToast(msg: message, gravity: ToastGravity.BOTTOM);
   }
 
+  PlantItem? _findPlantById(String plantId) {
+    final index = _plants.indexWhere((item) => item.id == plantId);
+    if (index == -1) {
+      return null;
+    }
+    return _plants[index];
+  }
+
   void _markWatered(PlantItem plant) {
+    final wateredAt = DateTime.now();
+    final target = _findPlantById(plant.id) ?? plant;
     setState(() {
-      plant.lastWateredAt = DateTime.now();
+      target.lastWateredAt = wateredAt;
+      _appendActivity(
+        _buildActivityEntry(
+          plant: target,
+          type: PlantActivityType.watered,
+          occurredAt: wateredAt,
+        ),
+      );
     });
     _persistPlants();
     AdService.showInterstitialIfNeeded();
-    _showToast(AppLocalizations.of(context).wateredToast(plant.name));
+    _showToast(AppLocalizations.of(context).wateredToast(target.name));
   }
 
   void _markPlantsWatered(List<PlantItem> plants) {
@@ -303,51 +344,127 @@ class _PlantRootPageState extends State<PlantRootPage> {
     setState(() {
       final wateredAt = DateTime.now();
       for (final plant in plants) {
-        plant.lastWateredAt = wateredAt;
+        final target = _findPlantById(plant.id) ?? plant;
+        target.lastWateredAt = wateredAt;
+        _appendActivity(
+          _buildActivityEntry(
+            plant: target,
+            type: PlantActivityType.watered,
+            occurredAt: wateredAt,
+          ),
+        );
       }
     });
     _persistPlants();
     AdService.showInterstitialIfNeeded();
-    _showToast('과제 ${plants.length}개를 처리했어요');
+    _showToast(context.l10n.bulkTasksDoneToast(plants.length));
   }
 
   void _savePlant(PlantItem plant, {bool isNew = false}) {
     setState(() {
       if (isNew) {
         _plants.add(plant);
+        _appendActivity(
+          _buildActivityEntry(
+            plant: plant,
+            type: PlantActivityType.registered,
+          ),
+        );
       } else {
         final index = _plants.indexWhere((item) => item.id == plant.id);
         if (index != -1) {
+          final previous = _plants[index];
+          if (previous.location != plant.location) {
+            _appendActivity(
+              _buildActivityEntry(
+                plant: plant,
+                type: PlantActivityType.moved,
+                detail: '${previous.location} -> ${plant.location}',
+              ),
+            );
+          }
+          if (previous.name != plant.name ||
+              previous.type != plant.type ||
+              previous.wateringCycleDays != plant.wateringCycleDays ||
+              previous.memo != plant.memo ||
+              previous.sunlight != plant.sunlight ||
+              previous.photoAssetIds.join(',') != plant.photoAssetIds.join(',')) {
+            _appendActivity(
+              _buildActivityEntry(
+                plant: plant,
+                type: PlantActivityType.updated,
+              ),
+            );
+          }
           _plants[index] = plant;
         }
       }
     });
     _persistPlants();
     AdService.showInterstitialIfNeeded();
+    _showToast(
+      isNew ? context.l10n.plantAddedToast : context.l10n.plantUpdatedToast,
+    );
+  }
+
+  void _deletePlant(String plantId) {
+    setState(() {
+      final targetIndex = _plants.indexWhere((item) => item.id == plantId);
+      if (targetIndex != -1) {
+        _appendActivity(
+          _buildActivityEntry(
+            plant: _plants[targetIndex],
+            type: PlantActivityType.deleted,
+          ),
+        );
+      }
+      _plants.removeWhere((item) => item.id == plantId);
+    });
+    _persistPlants();
+    _showToast(context.l10n.plantDeletedToast);
+  }
+
+  void _markRepotted(PlantItem plant) {
+    final target = _findPlantById(plant.id) ?? plant;
+    setState(() {
+      _appendActivity(
+        _buildActivityEntry(
+          plant: target,
+          type: PlantActivityType.repotted,
+        ),
+      );
+    });
+    _persistPlants();
+    _showToast(context.l10n.repottedToast(target.name));
   }
 
   Future<void> _openAddPlantSheet() async {
-    final created = await showModalBottomSheet<PlantItem>(
+    final result = await showModalBottomSheet<PlantEditSheetResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) => PlantEditSheet(presets: _plantPresets),
     );
-    if (created != null) {
-      _savePlant(created, isNew: true);
+    if (result?.plant != null) {
+      _savePlant(result!.plant!, isNew: true);
     }
   }
 
   Future<void> _openEditPlantSheet(PlantItem plant) async {
-    final updated = await showModalBottomSheet<PlantItem>(
+    final result = await showModalBottomSheet<PlantEditSheetResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) =>
           PlantEditSheet(existing: plant.copy(), presets: _plantPresets),
     );
-    if (updated != null) {
-      _savePlant(updated);
+    if (result == null) return;
+    if (result.deletedPlantId != null) {
+      _deletePlant(result.deletedPlantId!);
+      return;
+    }
+    if (result.plant != null) {
+      _savePlant(result.plant!);
     }
   }
 
@@ -364,12 +481,18 @@ class _PlantRootPageState extends State<PlantRootPage> {
             _markWatered(plant);
             Navigator.of(detailContext).pop();
           },
+          onRepotted: () {
+            _markRepotted(plant);
+            Navigator.of(detailContext).pop();
+          },
         ),
       ),
     );
   }
 
   Future<void> _showSettingsDialog() async {
+    await _syncNotificationPermissionState(showToast: false);
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) {
@@ -377,6 +500,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
           authUser: _authUser,
           isSigningIn: _isSigningIn,
           settings: _settings,
+          onSendTestNotification: _sendTestNotification,
           onSignInPressed: _handlePlatformSignIn,
           onSignOutPressed: _handleSignOut,
           onSettingsChanged: _handleSettingsChanged,
@@ -453,10 +577,28 @@ class _PlantRootPageState extends State<PlantRootPage> {
   }
 
   Future<void> _handleSettingsChanged(AppSettings settings) async {
+    final l10n = context.l10n;
+    final turnedOn = !_settings.notificationsEnabled && settings.notificationsEnabled;
+
+    if (turnedOn) {
+      final granted = await NotificationService.requestNotificationPermission();
+      if (!mounted) return;
+      if (!granted) {
+        setState(() {
+          _settings = settings.copyWith(notificationsEnabled: false);
+        });
+        await _persistSettingsOnly();
+        if (!mounted) return;
+        _showToast(l10n.notificationPermissionRequired);
+        return;
+      }
+    }
+
     setState(() {
       _settings = settings;
     });
     await _persistSettingsOnly();
+    await _syncNotificationPermissionState(showToast: false);
   }
 
   Future<void> _handlePlatformSignIn() async {
@@ -481,6 +623,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
               await _applySyncedData(
                 user,
                 profile.plants,
+                profile.activityLog,
                 profile.settings,
                 profile.updatedAt,
               );
@@ -492,6 +635,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
                 plants: List<PlantItem>.from(
                   _plants.map((item) => item.copy()),
                 ),
+                activityLog: List<PlantActivityEntry>.from(_activityLog),
                 settings: _settings,
               );
               await SyncStateService.markSynced(user, uploaded.updatedAt);
@@ -503,11 +647,13 @@ class _PlantRootPageState extends State<PlantRootPage> {
                 localPlants: List<PlantItem>.from(
                   _plants.map((item) => item.copy()),
                 ),
+                localActivityLog: List<PlantActivityEntry>.from(_activityLog),
                 localSettings: _settings,
               );
               await _applySyncedData(
                 user,
                 merged.plants,
+                merged.activityLog,
                 merged.settings,
                 merged.updatedAt,
               );
@@ -518,6 +664,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
           await _applySyncedData(
             user,
             profile.plants,
+            profile.activityLog,
             profile.settings,
             profile.updatedAt,
           );
@@ -526,6 +673,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
           final uploaded = await PlantSyncService.replaceWithLocal(
             user: user,
             plants: List<PlantItem>.from(_plants.map((item) => item.copy())),
+            activityLog: List<PlantActivityEntry>.from(_activityLog),
             settings: _settings,
           );
           await SyncStateService.markSynced(user, uploaded.updatedAt);
@@ -595,9 +743,16 @@ class _PlantRootPageState extends State<PlantRootPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bannerHeight = _bannerAd?.size.height.toDouble() ?? 0;
+    final bottomOverlayPadding =
+        _baseBottomOverlayPadding + bottomInset + bannerHeight;
+
     final pages = [
       HomeDashboardTab(
         plants: _plants,
+        presets: _plantPresets,
+        bottomPadding: bottomOverlayPadding,
         pinnedPlantId: _settings.pinnedHomePlantId,
         onTapPlant: _openPlantDetail,
         onMarkWatered: _markWatered,
@@ -606,14 +761,25 @@ class _PlantRootPageState extends State<PlantRootPage> {
       OrganizedMyPlantsTab(
         plants: _plants,
         presets: _plantPresets,
+        bottomPadding: bottomOverlayPadding,
         onTapPlant: _openPlantDetail,
         onEditPlant: _openEditPlantSheet,
+        onWaterPlant: _markWatered,
+        onRepotPlant: _markRepotted,
         pinnedPlantId: _settings.pinnedHomePlantId,
         onTogglePinnedPlant: _togglePinnedHomePlant,
         onAddPlant: _openAddPlantSheet,
       ),
-      CalendarTab(plants: _plants),
-      StatsTab(plants: _plants),
+      CalendarTab(
+        plants: _plants,
+        bottomPadding: bottomOverlayPadding,
+        onMarkPlantsWatered: _markPlantsWatered,
+      ),
+      StatsTab(
+        plants: _plants,
+        activities: _activityLog,
+        bottomPadding: bottomOverlayPadding + 56,
+      ),
     ];
     final l10n = context.l10n;
     final navItems = [
@@ -621,25 +787,25 @@ class _PlantRootPageState extends State<PlantRootPage> {
         label: l10n.home,
         subtitle: l10n.homeSubtitle,
         icon: Icons.home_rounded,
-        color: const Color(0xFF53B97C),
+        color: const Color(0xFF2F855A),
       ),
       _NavItemData(
         label: l10n.myPlants,
         subtitle: l10n.myPlantsSubtitle,
         icon: Icons.local_florist_rounded,
-        color: const Color(0xFF5BC0A5),
+        color: const Color(0xFF2F855A),
       ),
       _NavItemData(
         label: l10n.calendar,
         subtitle: l10n.calendarSubtitle,
         icon: Icons.calendar_month_rounded,
-        color: const Color(0xFFFFB648),
+        color: const Color(0xFF2F855A),
       ),
       _NavItemData(
         label: l10n.stats,
         subtitle: l10n.statsSubtitle,
         icon: Icons.bar_chart_rounded,
-        color: const Color(0xFFFF8E72),
+        color: const Color(0xFF2F855A),
       ),
     ];
     final activeNav = navItems[_currentIndex];
@@ -1376,309 +1542,352 @@ class _PlantStatusFilterChip extends StatelessWidget {
 }
 
 class CalendarTab extends StatefulWidget {
-  const CalendarTab({super.key, required this.plants});
+  const CalendarTab({
+    super.key,
+    required this.plants,
+    required this.bottomPadding,
+    required this.onMarkPlantsWatered,
+  });
 
   final List<PlantItem> plants;
+  final double bottomPadding;
+  final ValueChanged<List<PlantItem>> onMarkPlantsWatered;
 
   @override
   State<CalendarTab> createState() => _CalendarTabState();
 }
 
 class _CalendarTabState extends State<CalendarTab> {
-  static const int _initialPage = 1200;
-  late final PageController _pageController;
-  late DateTime _visibleMonth;
+  static const int _initialWeekPage = 1200;
+  late DateTime _selectedDate;
+  late DateTime _weekStart;
+  late final PageController _weekPageController;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _visibleMonth = DateTime(now.year, now.month);
-    _pageController = PageController(initialPage: _initialPage);
+    _selectedDate = DateTime(now.year, now.month, now.day);
+    _weekStart = _startOfWeek(_selectedDate);
+    _weekPageController = PageController(initialPage: _initialWeekPage);
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _weekPageController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final monthlyPlants = [...widget.plants]
-      ..retainWhere(
-        (plant) =>
-            plant.nextWateringAt.year == _visibleMonth.year &&
-            plant.nextWateringAt.month == _visibleMonth.month,
-      )
+    final weekDays = List<DateTime>.generate(
+      7,
+      (index) => _weekStart.add(Duration(days: index)),
+    );
+    final weeklyPlants = widget.plants
+        .where((plant) {
+          final next = plant.nextWateringAt;
+          final start = _weekStart;
+          final end = _weekStart.add(const Duration(days: 6));
+          return !next.isBefore(DateTime(start.year, start.month, start.day)) &&
+              !next.isAfter(DateTime(end.year, end.month, end.day, 23, 59, 59));
+        })
+        .toList()
       ..sort((a, b) => a.nextWateringAt.compareTo(b.nextWateringAt));
+    final selectedPlants = widget.plants
+        .where((plant) {
+          final next = plant.nextWateringAt;
+          return next.year == _selectedDate.year &&
+              next.month == _selectedDate.month &&
+              next.day == _selectedDate.day;
+        })
+        .toList()
+      ..sort((a, b) => a.daysUntilWatering.compareTo(b.daysUntilWatering));
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
+      padding: EdgeInsets.fromLTRB(20, 20, 20, widget.bottomPadding),
       children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final calendarWidth = constraints.maxWidth - 40;
-            final calendarHeight = _calendarCardHeightForMonth(
-              month: _visibleMonth,
-              width: calendarWidth,
-            );
-            return AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: SizedBox(
-                height: calendarHeight,
+        _GlassPanel(
+          padding: const EdgeInsets.all(18),
+          borderRadius: 30,
+          blurSigma: 14,
+          backgroundColor: Colors.white.withValues(alpha: 0.46),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: () {
+                      _weekPageController.previousPage(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                      );
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.45),
+                    ),
+                    icon: const Icon(Icons.chevron_left_rounded),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          '${_weekStart.month}월 ${_weekStart.day}일 - ${weekDays.last.month}월 ${weekDays.last.day}일',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF17342A),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '이번 주 예정된 식물 ${weeklyPlants.length}개',
+                          style: const TextStyle(
+                            color: Color(0xFF5F746A),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      _weekPageController.nextPage(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                      );
+                    },
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.45),
+                    ),
+                    icon: const Icon(Icons.chevron_right_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 110,
                 child: PageView.builder(
-                  controller: _pageController,
+                  controller: _weekPageController,
                   onPageChanged: (page) {
+                    final nextWeekStart = _weekStartFromPage(page);
                     setState(() {
-                      _visibleMonth = _monthFromPage(page);
+                      _weekStart = nextWeekStart;
+                      if (_selectedDate.isBefore(_weekStart) ||
+                          _selectedDate.isAfter(
+                            _weekStart.add(const Duration(days: 6)),
+                          )) {
+                        _selectedDate = _weekStart;
+                      }
                     });
                   },
-                  itemBuilder: (context, index) {
-                    final month = _monthFromPage(index);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _MonthCalendarCard(
-                        month: month,
-                        plants: widget.plants,
-                      ),
+                  itemBuilder: (context, page) {
+                    final pageWeekStart = _weekStartFromPage(page);
+                    final pageWeekDays = List<DateTime>.generate(
+                      7,
+                      (index) => pageWeekStart.add(Duration(days: index)),
+                    );
+                    return Row(
+                      children: [
+                        for (var i = 0; i < pageWeekDays.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 8),
+                          Expanded(
+                            child: _CalendarDayCell(
+                              date: pageWeekDays[i],
+                              isToday: _isSameDate(pageWeekDays[i], DateTime.now()),
+                              isSelected: _isSameDate(pageWeekDays[i], _selectedDate),
+                              dueCount: _dueCountForDay(pageWeekDays[i]),
+                              onTap: () {
+                                setState(() {
+                                  _selectedDate = pageWeekDays[i];
+                                  _weekStart = pageWeekStart;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
                     );
                   },
                 ),
               ),
-            );
-          },
+            ],
+          ),
         ),
         const SizedBox(height: 20),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.pageLabelManageMonth(_visibleMonth),
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+        _GlassPanel(
+          padding: const EdgeInsets.all(18),
+          borderRadius: 28,
+          blurSigma: 12,
+          backgroundColor: const Color(0xFFF4FFF8).withValues(alpha: 0.46),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '이번 주 예정',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                weeklyPlants.isEmpty ? l10n.calendarNoSchedule : '이번 주 물주기 흐름을 한 번에 볼 수 있어요.',
+                style: const TextStyle(color: Colors.black54, height: 1.45),
+              ),
+              const SizedBox(height: 14),
+              if (weeklyPlants.isEmpty)
+                const Text(
+                  '이번 주 예정된 식물이 없습니다.',
+                  style: TextStyle(color: Colors.black54),
+                )
+              else
+                ...weeklyPlants.map(
+                  (plant) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: _statusColor(plant.status).withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${plant.nextWateringAt.day}',
+                              style: TextStyle(
+                                color: _statusColor(plant.status),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                plant.name,
+                                style: const TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${plant.type} · ${plant.location}',
+                                style: const TextStyle(color: Colors.black54),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          _statusText(plant.status),
+                          style: TextStyle(
+                            color: _statusColor(plant.status),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                if (monthlyPlants.isEmpty)
-                  Text(
-                    l10n.calendarNoSchedule,
-                    style: const TextStyle(color: Colors.black54),
-                  )
-                else
-                  ...monthlyPlants.map(
-                    (plant) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _GlassPanel(
+          padding: const EdgeInsets.all(18),
+          borderRadius: 28,
+          blurSigma: 12,
+          backgroundColor: Colors.white.withValues(alpha: 0.5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${_selectedDate.month}월 ${_selectedDate.day}일',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (selectedPlants.isEmpty)
+                const Text(
+                  '이 날짜에 예정된 물주기 식물이 없습니다.',
+                  style: TextStyle(color: Colors.black54),
+                )
+              else ...[
+                ...selectedPlants.map(
+                  (plant) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.42),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+                      ),
                       child: Row(
                         children: [
                           Container(
-                            width: 52,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            width: 12,
+                            height: 12,
                             decoration: BoxDecoration(
-                              color: _statusColor(
-                                plant.status,
-                              ).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  '${plant.nextWateringAt.day}',
-                                  style: TextStyle(
-                                    color: _statusColor(plant.status),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                Text(
-                                  l10n.weekdayShort(
-                                    plant.nextWateringAt.weekday,
-                                  ),
-                                  style: TextStyle(
-                                    color: _statusColor(plant.status),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  plant.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${plant.type} · ${plant.location}',
-                                  style: const TextStyle(color: Colors.black54),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            _statusText(plant.status),
-                            style: TextStyle(
                               color: _statusColor(plant.status),
-                              fontWeight: FontWeight.w700,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '${plant.name} 물주기 예정',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
+                ),
+                const SizedBox(height: 6),
+                FilledButton(
+                  onPressed: () => widget.onMarkPlantsWatered(selectedPlants),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2F855A),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(52),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text('미리 물 주기'),
+                ),
               ],
-            ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  DateTime _monthFromPage(int page) {
-    final offset = page - _initialPage;
-    final base = DateTime.now();
-    return DateTime(base.year, base.month + offset);
+  DateTime _startOfWeek(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final offset = normalized.weekday % 7;
+    return normalized.subtract(Duration(days: offset));
   }
 
-  double _calendarCardHeightForMonth({
-    required DateTime month,
-    required double width,
-  }) {
-    final firstDay = DateTime(month.year, month.month, 1);
-    final lastDay = DateTime(month.year, month.month + 1, 0);
-    final leadingEmpty = firstDay.weekday % 7;
-    final daySlots = leadingEmpty + lastDay.day;
-    final weekRows = (daySlots / 7).ceil();
-    const childAspectRatio = 0.68;
-    final cellWidth = width / 7;
-    final cellHeight = cellWidth / childAspectRatio;
-    final gridRows = weekRows + 1;
-    const topSectionHeight = 136.0;
-    const bottomSpacing = 18.0;
-    return topSectionHeight + (cellHeight * gridRows) + bottomSpacing;
+  DateTime _weekStartFromPage(int page) {
+    final offsetWeeks = page - _initialWeekPage;
+    return _startOfWeek(DateTime.now()).add(Duration(days: offsetWeeks * 7));
   }
-}
 
-class _MonthCalendarCard extends StatelessWidget {
-  const _MonthCalendarCard({required this.month, required this.plants});
-
-  final DateTime month;
-  final List<PlantItem> plants;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final firstDay = DateTime(month.year, month.month, 1);
-    final lastDay = DateTime(month.year, month.month + 1, 0);
-    final leadingEmpty = firstDay.weekday % 7;
-    final totalCells = leadingEmpty + lastDay.day;
-    final trailingEmpty = (7 - (totalCells % 7)) % 7;
-    final today = DateTime.now();
-
-    final cells = <Widget>[
-      for (final label
-          in <String>[
-            'Sun',
-            'Mon',
-            'Tue',
-            'Wed',
-            'Thu',
-            'Fri',
-            'Sat',
-          ].asMap().entries.map((entry) {
-            const weekdayMap = [7, 1, 2, 3, 4, 5, 6];
-            return l10n.weekdayShort(weekdayMap[entry.key]);
-          }))
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.black45,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      for (var i = 0; i < leadingEmpty; i++) const SizedBox.shrink(),
-      for (var day = 1; day <= lastDay.day; day++)
-        _CalendarDayCell(
-          date: DateTime(month.year, month.month, day),
-          isToday:
-              today.year == month.year &&
-              today.month == month.month &&
-              today.day == day,
-          dueCount: _dueCountForDay(DateTime(month.year, month.month, day)),
-        ),
-      for (var i = 0; i < trailingEmpty; i++) const SizedBox.shrink(),
-    ];
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5FBF7),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.calendar_today_rounded,
-                size: 18,
-                color: Color(0xFF2F855A),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                l10n.monthCalendarTitle(month),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            l10n.calendarBadgeHint,
-            style: const TextStyle(color: Colors.black54, height: 1.4),
-          ),
-          const SizedBox(height: 16),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 7,
-            childAspectRatio: 0.68,
-            children: cells,
-          ),
-        ],
-      ),
-    );
+  bool _isSameDate(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   int _dueCountForDay(DateTime target) {
-    return plants.where((plant) {
+    return widget.plants.where((plant) {
       final next = plant.nextWateringAt;
       return next.year == target.year &&
           next.month == target.month &&
@@ -1691,332 +1900,667 @@ class _CalendarDayCell extends StatelessWidget {
   const _CalendarDayCell({
     required this.date,
     required this.isToday,
+    required this.isSelected,
     required this.dueCount,
+    required this.onTap,
   });
 
   final DateTime date;
   final bool isToday;
+  final bool isSelected;
   final int dueCount;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final hasEvent = dueCount > 0;
-    return Container(
-      margin: const EdgeInsets.all(3),
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      decoration: BoxDecoration(
-        color: isToday
-            ? const Color(0xFF2F855A)
-            : hasEvent
-            ? const Color(0xFFE7F7EE)
-            : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isToday ? const Color(0xFF2F855A) : const Color(0x11000000),
+    final weekday = context.l10n.weekdayShort(date.weekday);
+    const badgeSlotHeight = 21.0;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        height: 110,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF2F855A).withValues(alpha: 0.92)
+              : Colors.white.withValues(alpha: 0.38),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF2F855A)
+                : Colors.white.withValues(alpha: 0.65),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: isSelected
+                  ? const Color(0x332F855A)
+                  : const Color(0x11000000),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Text(
+              weekday,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: isSelected ? Colors.white70 : const Color(0xFF6A7C72),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${date.day}',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: isSelected ? Colors.white : const Color(0xFF19342A),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: badgeSlotHeight,
+              child: Center(
+                child: hasEvent
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.white.withValues(alpha: 0.18)
+                              : const Color(0xFF53B97C),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$dueCount',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.white54
+                              : (isToday
+                                    ? const Color(0xFF53B97C)
+                                    : const Color(0x22000000)),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '${date.day}',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              color: isToday ? Colors.white : const Color(0xFF24332A),
-            ),
-          ),
-          const SizedBox(height: 4),
-          if (hasEvent)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: isToday
-                    ? Colors.white.withValues(alpha: 0.2)
-                    : const Color(0xFF53B97C),
-                borderRadius: BorderRadius.circular(99),
-              ),
-              child: Text(
-                '$dueCount',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: isToday ? Colors.white : Colors.white,
+    );
+  }
+}
+
+class StatsTab extends StatefulWidget {
+  const StatsTab({
+    super.key,
+    required this.plants,
+    required this.activities,
+    required this.bottomPadding,
+  });
+
+  final List<PlantItem> plants;
+  final List<PlantActivityEntry> activities;
+  final double bottomPadding;
+
+  @override
+  State<StatsTab> createState() => _StatsTabState();
+}
+
+class _StatsTabState extends State<StatsTab> {
+  static const int _pageSize = 20;
+  late final ScrollController _scrollController;
+  int _visibleCount = _pageSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController()..addListener(_handleScroll);
+  }
+
+  @override
+  void didUpdateWidget(covariant StatsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activities.length != widget.activities.length) {
+      _visibleCount = _pageSize;
+    }
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.pixels < position.maxScrollExtent - 240) {
+      return;
+    }
+    final totalCount = widget.activities.length;
+    if (_visibleCount >= totalCount) {
+      return;
+    }
+    setState(() {
+      _visibleCount = (_visibleCount + _pageSize).clamp(0, totalCount);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final recentActivities = [...widget.activities]
+      ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+    final visibleActivities = recentActivities.take(_visibleCount).toList();
+    final actionCounts = <PlantActivityType, int>{
+      for (final type in PlantActivityType.values) type: 0,
+    };
+    for (final activity in recentActivities.take(30)) {
+      actionCounts.update(
+        activity.type,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+
+    return ListView(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(20, 20, 20, widget.bottomPadding),
+      children: [
+        _GlassPanel(
+          padding: const EdgeInsets.all(22),
+          borderRadius: 30,
+          blurSigma: 16,
+          backgroundColor: const Color(0xFFE7FFF1).withValues(alpha: 0.34),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.recentActionChart,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF17342A),
                 ),
               ),
-            )
-          else
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: isToday ? Colors.white30 : const Color(0x14000000),
-                shape: BoxShape.circle,
+              const SizedBox(height: 8),
+              Text(
+                widget.plants.isEmpty
+                    ? l10n.recentActionChartEmpty
+                    : l10n.recentActionChartHint,
+                style: const TextStyle(color: Color(0xFF5D7268), height: 1.45),
+              ),
+              const SizedBox(height: 18),
+              _ActivityChart(actionCounts: actionCounts),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        if (recentActivities.isEmpty)
+          EmptyCard(message: l10n.timelineEmpty)
+        else
+          ...List.generate(visibleActivities.length, (index) {
+            final activity = visibleActivities[index];
+            return _StatTimelineItem(
+              activity: activity,
+              isFirst: index == 0,
+              isLast: index == visibleActivities.length - 1,
+            );
+          }),
+        if (recentActivities.length > visibleActivities.length)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Center(
+              child: Text(
+                l10n.activityCountProgress(
+                  visibleActivities.length,
+                  recentActivities.length,
+                ),
+                style: const TextStyle(
+                  color: Color(0xFF6A7C72),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ActivityChart extends StatelessWidget {
+  const _ActivityChart({required this.actionCounts});
+
+  final Map<PlantActivityType, int> actionCounts;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = PlantActivityType.values
+        .map(
+          (type) => (
+            type: type,
+            count: actionCounts[type] ?? 0,
+          ),
+        )
+        .toList(growable: false);
+    final maxCount = entries.fold<int>(
+      1,
+      (maxValue, entry) => entry.count > maxValue ? entry.count : maxValue,
+    );
+
+    return Column(
+      children: [
+        for (final entry in entries) ...[
+          _ActionChartRow(
+            type: entry.type,
+            count: entry.count,
+            maxCount: maxCount,
+          ),
+          if (entry != entries.last) const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+}
+
+class _ActionChartRow extends StatelessWidget {
+  const _ActionChartRow({
+    required this.type,
+    required this.count,
+    required this.maxCount,
+  });
+
+  final PlantActivityType type;
+  final int count;
+  final int maxCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final color = _activityColor(type);
+    final ratio = maxCount == 0 ? 0.0 : count / maxCount;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 108,
+          child: Row(
+            children: [
+              Icon(_activityIcon(type), color: color, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _activityLabel(l10n, type),
+                  style: const TextStyle(
+                    color: Color(0xFF27453A),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              height: 12,
+              color: Colors.white.withValues(alpha: 0.4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: ratio.clamp(0.0, 1.0),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          color.withValues(alpha: 0.9),
+                          color.withValues(alpha: 0.55),
+                        ],
+                      ),
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 28,
+          child: Text(
+            '$count',
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              color: Color(0xFF17342A),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GlassPanel extends StatelessWidget {
+  const _GlassPanel({
+    required this.child,
+    this.padding = const EdgeInsets.all(16),
+    this.borderRadius = 26,
+    this.blurSigma = 10,
+    this.backgroundColor,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double borderRadius;
+  final double blurSigma;
+  final Color? backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: backgroundColor ?? Colors.white.withValues(alpha: 0.36),
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.68)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x12000000),
+                blurRadius: 24,
+                offset: Offset(0, 14),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _StatTimelineItem extends StatelessWidget {
+  const _StatTimelineItem({
+    required this.activity,
+    required this.isFirst,
+    required this.isLast,
+  });
+
+  final PlantActivityEntry activity;
+  final bool isFirst;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final color = _activityColor(activity.type);
+    final location = activity.location.trim().isEmpty
+        ? context.l10n.locationUnset
+        : activity.location.trim();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 42,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: isFirst
+                          ? Colors.transparent
+                          : color.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: Icon(
+                      _activityIcon(activity.type),
+                      size: 30,
+                      color: color,
+                    ),
+                  ),
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: isLast
+                          ? Colors.transparent
+                          : color.withValues(alpha: 0.22),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _GlassPanel(
+                padding: const EdgeInsets.all(18),
+                borderRadius: 26,
+                blurSigma: 14,
+                backgroundColor: Colors.white.withValues(alpha: 0.42),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            activity.plantName,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF17342A),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            _activityLabel(l10n, activity.type),
+                            style: TextStyle(
+                              color: color,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${activity.plantType} · $location',
+                      style: const TextStyle(
+                        color: Color(0xFF546A60),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _TimelineMeta(
+                            label: l10n.actionTime,
+                            value: _activityDateTimeLabel(activity.occurredAt),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _TimelineMeta(
+                            label: l10n.detail,
+                            value: activity.detail ?? _activityDescription(l10n, activity.type),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TimelineMeta extends StatelessWidget {
+  const _TimelineMeta({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.36),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF72857B),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF17342A),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class StatsTab extends StatelessWidget {
-  const StatsTab({super.key, required this.plants});
+PlantActivityEntry _buildActivityEntry({
+  required PlantItem plant,
+  required PlantActivityType type,
+  DateTime? occurredAt,
+  String? detail,
+}) {
+  return PlantActivityEntry(
+    id: '${type.name}_${plant.id}_${(occurredAt ?? DateTime.now()).microsecondsSinceEpoch}',
+    plantId: plant.id,
+    plantName: plant.name,
+    plantType: plant.type,
+    location: plant.location,
+    type: type,
+    occurredAt: occurredAt ?? DateTime.now(),
+    detail: detail,
+  );
+}
 
-  final List<PlantItem> plants;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final total = plants.length;
-    final healthy = plants
-        .where((plant) => plant.status == PlantStatus.healthy)
-        .length;
-    final dueToday = plants
-        .where((plant) => plant.status == PlantStatus.today)
-        .length;
-    final overdue = plants
-        .where((plant) => plant.status == PlantStatus.overdue)
-        .length;
-    final avgCycle = plants.isEmpty
-        ? 0
-        : (plants
-                      .map((plant) => plant.wateringCycleDays)
-                      .reduce((a, b) => a + b) /
-                  plants.length)
-              .round();
-    final strongestPlant = plants.isEmpty
-        ? null
-        : ([...plants]..sort(
-                (a, b) => a.daysUntilWatering.compareTo(b.daysUntilWatering),
-              ))
-              .first;
-
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding + 56),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111A16),
-              borderRadius: BorderRadius.circular(28),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.statsTitle,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  strongestPlant == null
-                      ? l10n.noPlantsYet
-                      : l10n.overallStatsHint(strongestPlant.name),
-                  style: const TextStyle(
-                    color: Color(0xBFFFFFFF),
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _DarkMetricTile(
-                        label: '등록 식물',
-                        value: l10n.registeredPlantsCount(total),
-                        accent: const Color(0xFF5BC0A5),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _DarkMetricTile(
-                        label: '평균 주기',
-                        value: l10n.averageCycle(avgCycle),
-                        accent: const Color(0xFFFFD166),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          GridView.count(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 0.74,
-            children: [
-              _SoftStatCard(
-                title: l10n.healthyState,
-                value: l10n.healthyKeep(healthy),
-                detail: l10n.healthyDesc,
-                color: const Color(0xFF2B9348),
-                icon: Icons.favorite_rounded,
-              ),
-              _SoftStatCard(
-                title: l10n.todayWatering,
-                value: l10n.dueTodayCount(dueToday),
-                detail: l10n.todayDesc,
-                color: const Color(0xFFF59E0B),
-                icon: Icons.water_drop_rounded,
-              ),
-              _SoftStatCard(
-                title: l10n.overdue,
-                value: l10n.overdueCount(overdue),
-                detail: l10n.overdueDesc,
-                color: const Color(0xFFDC2626),
-                icon: Icons.crisis_alert_rounded,
-              ),
-              _SoftStatCard(
-                title: '전체 루틴',
-                value: l10n.totalPlantsMetric(total),
-                detail: '기록 중인 식물 수',
-                color: const Color(0xFF2F855A),
-                icon: Icons.local_florist_rounded,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(26),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0C000000),
-                  blurRadius: 20,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.statsCycleFlow,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  l10n.statsCycleFlowHint,
-                  style: const TextStyle(color: Colors.black54),
-                ),
-                const SizedBox(height: 16),
-                ...plants.map((plant) {
-                  final ratio = (plant.wateringCycleDays / 21).clamp(0.1, 1.0);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                plant.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _statusColor(
-                                  plant.status,
-                                ).withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                l10n.cycleDaysLabel(plant.wateringCycleDays),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(99),
-                          child: LinearProgressIndicator(
-                            value: ratio,
-                            minHeight: 10,
-                            backgroundColor: const Color(0xFFE5E7EB),
-                            color: _statusColor(plant.status),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-                const Divider(height: 28),
-                Text(
-                  '평균 물주기 주기: ${l10n.averageCycle(avgCycle)}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (plants.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFFBF2),
-                borderRadius: BorderRadius.circular(26),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFE7B3),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(
-                      Icons.tips_and_updates_rounded,
-                      color: Color(0xFFC08400),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      overdue > 0
-                          ? l10n.oldestOverdueHint
-                          : l10n.stableFlowHint,
-                      style: const TextStyle(
-                        height: 1.5,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+void _appendActivityToList(
+  List<PlantActivityEntry> activities,
+  PlantActivityEntry entry,
+) {
+  activities.insert(0, entry);
+  if (activities.length > 120) {
+    activities.removeRange(120, activities.length);
   }
+}
+
+IconData _activityIcon(PlantActivityType type) {
+  return switch (type) {
+    PlantActivityType.registered => Icons.add_circle_rounded,
+    PlantActivityType.watered => Icons.water_drop_rounded,
+    PlantActivityType.repotted => Icons.inventory_2_rounded,
+    PlantActivityType.moved => Icons.place_rounded,
+    PlantActivityType.updated => Icons.edit_rounded,
+    PlantActivityType.deleted => Icons.delete_rounded,
+  };
+}
+
+Color _activityColor(PlantActivityType type) {
+  return switch (type) {
+    PlantActivityType.registered => const Color(0xFF2F855A),
+    PlantActivityType.watered => const Color(0xFF2B6DE0),
+    PlantActivityType.repotted => const Color(0xFF9C6B2F),
+    PlantActivityType.moved => const Color(0xFF8E5AD7),
+    PlantActivityType.updated => const Color(0xFFEF8D32),
+    PlantActivityType.deleted => const Color(0xFFD9534F),
+  };
+}
+
+String _activityLabel(AppLocalizations l10n, PlantActivityType type) {
+  return switch (type) {
+    PlantActivityType.registered => l10n.languageCode == 'ko' ? '등록' : l10n.languageCode == 'ja' ? '登録' : l10n.languageCode == 'zh' ? '登记' : 'Added',
+    PlantActivityType.watered => l10n.languageCode == 'ko' ? '물주기' : l10n.languageCode == 'ja' ? '水やり' : l10n.languageCode == 'zh' ? '浇水' : 'Watered',
+    PlantActivityType.repotted => l10n.languageCode == 'ko' ? '분갈이' : l10n.languageCode == 'ja' ? '植え替え' : l10n.languageCode == 'zh' ? '换盆' : 'Repotted',
+    PlantActivityType.moved => l10n.languageCode == 'ko' ? '위치 변경' : l10n.languageCode == 'ja' ? '場所変更' : l10n.languageCode == 'zh' ? '位置变更' : 'Moved',
+    PlantActivityType.updated => l10n.languageCode == 'ko' ? '정보 수정' : l10n.languageCode == 'ja' ? '情報修正' : l10n.languageCode == 'zh' ? '信息修改' : 'Updated',
+    PlantActivityType.deleted => l10n.languageCode == 'ko' ? '삭제' : l10n.languageCode == 'ja' ? '削除' : l10n.languageCode == 'zh' ? '删除' : 'Deleted',
+  };
+}
+
+String _activityDescription(AppLocalizations l10n, PlantActivityType type) {
+  return switch (type) {
+    PlantActivityType.registered => l10n.languageCode == 'ko' ? '식물을 새로 등록했어요.' : l10n.languageCode == 'ja' ? '植物を新しく登録しました。' : l10n.languageCode == 'zh' ? '已登记新的植物。' : 'Added a new plant.',
+    PlantActivityType.watered => l10n.languageCode == 'ko' ? '물주기 완료로 기록했어요.' : l10n.languageCode == 'ja' ? '水やり完了として記録しました。' : l10n.languageCode == 'zh' ? '已记录为完成浇水。' : 'Recorded watering as completed.',
+    PlantActivityType.repotted => l10n.languageCode == 'ko' ? '화분 교체 이력을 남겼어요.' : l10n.languageCode == 'ja' ? '植え替え履歴を残しました。' : l10n.languageCode == 'zh' ? '已记录换盆历史。' : 'Saved a repotting record.',
+    PlantActivityType.moved => l10n.languageCode == 'ko' ? '식물 위치를 옮겼어요.' : l10n.languageCode == 'ja' ? '植物の場所を移動しました。' : l10n.languageCode == 'zh' ? '已移动植物位置。' : 'Moved the plant location.',
+    PlantActivityType.updated => l10n.languageCode == 'ko' ? '식물 정보를 수정했어요.' : l10n.languageCode == 'ja' ? '植物情報を修正しました。' : l10n.languageCode == 'zh' ? '已修改植物信息。' : 'Updated the plant information.',
+    PlantActivityType.deleted => l10n.languageCode == 'ko' ? '목록에서 식물을 제거했어요.' : l10n.languageCode == 'ja' ? '一覧から植物を削除しました。' : l10n.languageCode == 'zh' ? '已从列表中删除植物。' : 'Removed the plant from the list.',
+  };
+}
+
+String _activityDateTimeLabel(DateTime dateTime) {
+  final hh = dateTime.hour.toString().padLeft(2, '0');
+  final mm = dateTime.minute.toString().padLeft(2, '0');
+  return '${dateTime.month}.${dateTime.day} $hh:$mm';
 }
 
 class _GardenBottomNav extends StatelessWidget {
@@ -2159,6 +2703,52 @@ class _NavItemData {
   final Color color;
 }
 
+class _PlantImagePlaceholder extends StatelessWidget {
+  const _PlantImagePlaceholder({
+    required this.background,
+    required this.iconColor,
+    this.iconSize = 42,
+  });
+
+  final Decoration background;
+  final Color iconColor;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: background,
+      child: Center(
+        child: Container(
+          width: iconSize * 1.9,
+          height: iconSize * 1.9,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(iconSize),
+          ),
+          child: Padding(
+            padding: EdgeInsets.all(iconSize * 0.34),
+            child: Image.asset(
+              'assets/branding/app_logo.png',
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PlantEditSheetResult {
+  const PlantEditSheetResult({
+    this.plant,
+    this.deletedPlantId,
+  });
+
+  final PlantItem? plant;
+  final String? deletedPlantId;
+}
+
 class PlantEditSheet extends StatefulWidget {
   const PlantEditSheet({super.key, this.existing, required this.presets});
 
@@ -2184,38 +2774,35 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   void initState() {
     super.initState();
     final current = widget.existing;
+    final fallbackCycle = current?.wateringCycleDays ?? 7;
     _availablePresets = widget.presets.isNotEmpty
         ? List<PlantPreset>.from(widget.presets)
         : List<PlantPreset>.from(kPlantPresets);
-    _selectedPreset = _availablePresets.firstWhere(
-      (preset) => preset.type == current?.type,
-      orElse: () {
-        if (current != null) {
-          return PlantPreset(
-            type: current.type,
-            defaultWateringCycleDays: current.wateringCycleDays,
-            sunlight: current.sunlight,
-            tip: current.memo,
-          );
-        }
-        return _availablePresets.first;
-      },
-    );
+    _selectedPreset = current != null
+        ? _availablePresets.firstWhere(
+            (preset) => preset.type == current.type,
+            orElse: () => _manualPreset(
+              current.type,
+              cycleDays: current.wateringCycleDays,
+              sunlight: current.sunlight,
+              tip: current.memo,
+            ),
+          )
+        : _manualPreset('', cycleDays: fallbackCycle);
     if (!_availablePresets.any(
-      (preset) => preset.type == _selectedPreset.type,
+      (preset) =>
+          _selectedPreset.type.trim().isNotEmpty &&
+          preset.type == _selectedPreset.type,
     )) {
       _availablePresets = [_selectedPreset, ..._availablePresets];
     }
     _nameController = TextEditingController(text: current?.name ?? '');
     _locationController = TextEditingController(text: current?.location ?? '');
-    _memoController = TextEditingController(
-      text: current?.memo ?? _selectedPreset.tip,
-    );
+    _memoController = TextEditingController(text: current?.memo ?? '');
     _cycleController = TextEditingController(
-      text:
-          '${current?.wateringCycleDays ?? _selectedPreset.defaultWateringCycleDays}',
+      text: '${current?.wateringCycleDays ?? fallbackCycle}',
     );
-    _presetSearchController = TextEditingController(text: _selectedPreset.type);
+    _presetSearchController = TextEditingController(text: current?.type ?? '');
     _lastWateredAt = current?.lastWateredAt ?? DateTime.now();
     _photoAssetIds = List<String>.from(current?.photoAssetIds ?? const []);
   }
@@ -2235,17 +2822,48 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     setState(() {
       _selectedPreset = preset;
       _presetSearchController.text = preset.type;
-      if (_nameController.text.trim().isEmpty ||
-          _nameController.text.trim() == widget.existing?.name) {
+      if (preset.type.trim().isNotEmpty &&
+          (_nameController.text.trim().isEmpty ||
+              _nameController.text.trim() == widget.existing?.name)) {
         _nameController.text = preset.type;
       }
       _cycleController.text = '${preset.defaultWateringCycleDays}';
-      if (_memoController.text.trim().isEmpty ||
+      if (preset.tip.trim().isNotEmpty &&
+          (_memoController.text.trim().isEmpty ||
           _memoController.text.trim() == widget.existing?.memo ||
-          _memoController.text.trim() == previousTip) {
+          _memoController.text.trim() == previousTip)) {
         _memoController.text = preset.tip;
       }
     });
+  }
+
+  PlantPreset _manualPreset(
+    String type, {
+    int cycleDays = 7,
+    String sunlight = '',
+    String tip = '',
+  }) {
+    return PlantPreset(
+      type: type.trim(),
+      defaultWateringCycleDays: cycleDays,
+      sunlight: sunlight,
+      tip: tip,
+    );
+  }
+
+  Future<void> _openPresetSearchSheet() async {
+    final selected = await showModalBottomSheet<PlantPreset>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _PlantPresetSearchSheet(
+        presets: _availablePresets,
+        initialQuery: _presetSearchController.text,
+      ),
+    );
+    if (selected != null) {
+      _applyPreset(selected);
+    }
   }
 
   Future<void> _openPhotoPicker() async {
@@ -2366,6 +2984,7 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
     final l10n = context.l10n;
     final bottomInset = mediaQuery.viewInsets.bottom;
     final bottomSafeArea = mediaQuery.viewPadding.bottom;
+    final actionBottomPadding = bottomInset > 0 ? 14.0 : 14.0 + bottomSafeArea;
     final sheetHeight = mediaQuery.size.height * 0.8;
     final isEditing = widget.existing != null;
     return Padding(
@@ -2456,7 +3075,9 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                               ),
                               _InfoPill(
                                 icon: Icons.wb_sunny_rounded,
-                                label: _selectedPreset.sunlight,
+                                label: _selectedPreset.sunlight.trim().isEmpty
+                                    ? l10n.sunlightUnknown
+                                    : _selectedPreset.sunlight,
                                 tint: const Color(0xFFFFF2DE),
                               ),
                               _InfoPill(
@@ -2480,111 +3101,81 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
                       subtitle: l10n.basicInfoHint,
                       child: Column(
                         children: [
-                          Autocomplete<PlantPreset>(
-                            initialValue: TextEditingValue(
-                              text: _selectedPreset.type,
-                            ),
-                            displayStringForOption: (option) => option.type,
-                            optionsBuilder: (textEditingValue) {
-                              final query = textEditingValue.text.trim();
-                              if (query.isEmpty) {
-                                return _availablePresets.take(8);
-                              }
-                              return _availablePresets
-                                  .where((preset) => preset.matchesQuery(query))
-                                  .take(8);
-                            },
-                            onSelected: _applyPreset,
-                            fieldViewBuilder:
-                                (
-                                  context,
-                                  textEditingController,
-                                  focusNode,
-                                  onFieldSubmitted,
-                                ) {
-                                  if (_presetSearchController.text !=
-                                      textEditingController.text) {
-                                    textEditingController.text =
-                                        _presetSearchController.text;
-                                    textEditingController
-                                        .selection = TextSelection.collapsed(
-                                      offset: textEditingController.text.length,
-                                    );
-                                  }
-                                  return TextField(
-                                    controller: textEditingController,
-                                    focusNode: focusNode,
-                                    decoration: _sheetInputDecoration(
-                                      label: l10n.searchPlantType,
-                                      icon: Icons.search_rounded,
-                                      hint: l10n.searchPlantTypeHint,
-                                    ),
-                                    onChanged: (value) {
-                                      final exact = _availablePresets
-                                          .cast<PlantPreset?>()
-                                          .firstWhere(
-                                            (preset) =>
-                                                preset?.type == value.trim(),
-                                            orElse: () => null,
-                                          );
-                                      if (exact != null &&
-                                          exact.type != _selectedPreset.type) {
-                                        _applyPreset(exact);
-                                      }
-                                    },
-                                    onSubmitted: (_) => onFieldSubmitted(),
-                                  );
-                                },
-                            optionsViewBuilder: (context, onSelected, options) {
-                              final items = options.toList(growable: false);
-                              return Align(
-                                alignment: Alignment.topLeft,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: Container(
-                                    width:
-                                        MediaQuery.of(context).size.width - 72,
-                                    constraints: const BoxConstraints(
-                                      maxHeight: 280,
-                                    ),
-                                    margin: const EdgeInsets.only(top: 8),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(22),
+                            onTap: _openPresetSearchSheet,
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FBF8),
+                                borderRadius: BorderRadius.circular(22),
+                                border: Border.all(
+                                  color: const Color(0xFFE3ECE6),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 44,
+                                    height: 44,
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(24),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: Color(0x14000000),
-                                          blurRadius: 24,
-                                          offset: Offset(0, 12),
+                                      color: const Color(0xFFEAF5EE),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: const Icon(
+                                      Icons.search_rounded,
+                                      color: Color(0xFF2F855A),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          l10n.choosePlantType,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _selectedPreset.type.trim().isEmpty
+                                              ? l10n.choosePlantTypeHint
+                                              : _selectedPreset.type,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: _selectedPreset.type
+                                                    .trim()
+                                                    .isEmpty
+                                                ? Colors.black45
+                                                : Colors.black87,
+                                            height: 1.35,
+                                          ),
                                         ),
                                       ],
                                     ),
-                                    child: ListView.separated(
-                                      padding: const EdgeInsets.all(10),
-                                      shrinkWrap: true,
-                                      itemCount: items.length,
-                                      separatorBuilder: (context, index) =>
-                                          const SizedBox(height: 6),
-                                      itemBuilder: (context, index) {
-                                        final preset = items[index];
-                                        return InkWell(
-                                          onTap: () => onSelected(preset),
-                                          borderRadius: BorderRadius.circular(
-                                            18,
-                                          ),
-                                          child: _PlantPresetOptionTile(
-                                            preset: preset,
-                                          ),
-                                        );
-                                      },
-                                    ),
                                   ),
-                                ),
-                              );
-                            },
+                                  const SizedBox(width: 12),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Colors.black45,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 14),
-                          _SelectedPlantPresetCard(preset: _selectedPreset),
+                          if (_selectedPreset.type.trim().isEmpty)
+                            _EmptyPresetSelectionCard(
+                              title: l10n.noPlantTypeSelected,
+                              subtitle: l10n.noPlantTypeSelectedHint,
+                            )
+                          else
+                            _SelectedPlantPresetCard(preset: _selectedPreset),
                           const SizedBox(height: 14),
                           TextField(
                             controller: _nameController,
@@ -2912,62 +3503,125 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
               ),
             ),
             Container(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottomSafeArea),
+              padding: EdgeInsets.fromLTRB(20, 14, 20, actionBottomPadding),
               decoration: const BoxDecoration(
                 color: Color(0xFFF6FBF7),
                 border: Border(top: BorderSide(color: Color(0x12000000))),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF2F855A), Color(0xFF43A26C)],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                child: FilledButton(
-                  onPressed: () {
-                    final cycle =
-                        int.tryParse(_cycleController.text.trim()) ??
-                        _selectedPreset.defaultWateringCycleDays;
-                    final plant = PlantItem(
-                      id:
-                          widget.existing?.id ??
-                          DateTime.now().millisecondsSinceEpoch.toString(),
-                      name: _nameController.text.trim().isEmpty
-                          ? _selectedPreset.type
-                          : _nameController.text.trim(),
-                      type: _selectedPreset.type,
-                      location: _locationController.text.trim().isEmpty
-                          ? l10n.noLocationEnteredFallback()
-                          : _locationController.text.trim(),
-                      wateringCycleDays: cycle,
-                      lastWateredAt: _lastWateredAt,
-                      memo: _memoController.text.trim().isEmpty
-                          ? _selectedPreset.tip
-                          : _memoController.text.trim(),
-                      sunlight: _selectedPreset.sunlight,
-                      photoAssetIds: List<String>.from(_photoAssetIds),
-                    );
-                    Navigator.of(context).pop(plant);
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    minimumSize: const Size.fromHeight(58),
-                    shape: RoundedRectangleBorder(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF2F855A), Color(0xFF43A26C)],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
                       borderRadius: BorderRadius.circular(22),
                     ),
-                  ),
-                  child: Text(
-                    isEditing ? l10n.saveChanges : l10n.registerPlant,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+                    child: FilledButton(
+                      onPressed: () {
+                        final cycle =
+                            int.tryParse(_cycleController.text.trim()) ??
+                            _selectedPreset.defaultWateringCycleDays;
+                        final resolvedType = _selectedPreset.type.trim().isNotEmpty
+                            ? _selectedPreset.type.trim()
+                            : (_nameController.text.trim().isNotEmpty
+                                  ? _nameController.text.trim()
+                                  : l10n.plantType);
+                        final plant = PlantItem(
+                          id:
+                              widget.existing?.id ??
+                              DateTime.now().millisecondsSinceEpoch.toString(),
+                          name: _nameController.text.trim().isEmpty
+                              ? resolvedType
+                              : _nameController.text.trim(),
+                          type: resolvedType,
+                          location: _locationController.text.trim().isEmpty
+                              ? l10n.noLocationEnteredFallback()
+                              : _locationController.text.trim(),
+                          wateringCycleDays: cycle,
+                          lastWateredAt: _lastWateredAt,
+                          memo: _memoController.text.trim().isEmpty
+                              ? (_selectedPreset.tip.trim().isEmpty
+                                    ? ''
+                                    : _selectedPreset.tip)
+                              : _memoController.text.trim(),
+                          sunlight: _selectedPreset.sunlight.trim().isEmpty
+                              ? ''
+                              : _selectedPreset.sunlight,
+                          photoAssetIds: List<String>.from(_photoAssetIds),
+                        );
+                        Navigator.of(
+                          context,
+                        ).pop(PlantEditSheetResult(plant: plant));
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        minimumSize: const Size.fromHeight(58),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                      ),
+                      child: Text(
+                        isEditing ? l10n.saveChanges : l10n.registerPlant,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  if (isEditing) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) {
+                            return AlertDialog(
+                              title: Text(l10n.deletePlant),
+                              content: Text(l10n.deletePlantConfirm),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(false),
+                                  child: Text(l10n.close),
+                                ),
+                                FilledButton(
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(true),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFFD95C45),
+                                  ),
+                                  child: Text(l10n.delete),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                        if (confirmed != true || !context.mounted) return;
+                        Navigator.of(context).pop(
+                          PlantEditSheetResult(
+                            deletedPlantId: widget.existing!.id,
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFD95C45),
+                        side: const BorderSide(color: Color(0xFFFFD5CF)),
+                        minimumSize: const Size.fromHeight(54),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: Text(l10n.deletePlant),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -3134,6 +3788,12 @@ class _PlantPresetOptionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final sunlightLabel = preset.sunlight.trim().isEmpty
+        ? l10n.sunlightUnknown
+        : preset.sunlight;
+    final tipLabel = preset.tip.trim().isEmpty
+        ? l10n.presetTipMissing
+        : preset.tip;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -3156,14 +3816,14 @@ class _PlantPresetOptionTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${l10n.cycleDaysLabel(preset.defaultWateringCycleDays)} · ${preset.sunlight}',
+                  '${l10n.cycleDaysLabel(preset.defaultWateringCycleDays)} · $sunlightLabel',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  preset.tip,
+                  tipLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.black45, fontSize: 12),
@@ -3185,6 +3845,12 @@ class _SelectedPlantPresetCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final sunlightLabel = preset.sunlight.trim().isEmpty
+        ? l10n.sunlightUnknown
+        : preset.sunlight;
+    final tipLabel = preset.tip.trim().isEmpty
+        ? l10n.presetTipMissing
+        : preset.tip;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -3210,12 +3876,12 @@ class _SelectedPlantPresetCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${l10n.defaultCycleDaysLabel(preset.defaultWateringCycleDays)} · ${preset.sunlight}',
+                  '${l10n.defaultCycleDaysLabel(preset.defaultWateringCycleDays)} · $sunlightLabel',
                   style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  preset.tip,
+                  tipLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.black45, fontSize: 12),
@@ -3224,6 +3890,262 @@ class _SelectedPlantPresetCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyPresetSelectionCard extends StatelessWidget {
+  const _EmptyPresetSelectionCard({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBF8),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE3ECE6)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF5EE),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(
+              Icons.local_florist_rounded,
+              color: Color(0xFF2F855A),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlantPresetSearchSheet extends StatefulWidget {
+  const _PlantPresetSearchSheet({
+    required this.presets,
+    required this.initialQuery,
+  });
+
+  final List<PlantPreset> presets;
+  final String initialQuery;
+
+  @override
+  State<_PlantPresetSearchSheet> createState() => _PlantPresetSearchSheetState();
+}
+
+class _PlantPresetSearchSheetState extends State<_PlantPresetSearchSheet> {
+  static const int _maxVisibleResults = 30;
+  late final TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.initialQuery);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<PlantPreset> get _results {
+    final query = _searchController.text.trim();
+    final source = query.isEmpty
+        ? widget.presets
+        : widget.presets.where((preset) => preset.matchesQuery(query));
+    return source.take(_maxVisibleResults).toList(growable: false);
+  }
+
+  PlantPreset _manualPreset(String query) {
+    return PlantPreset(
+      type: query.trim(),
+      defaultWateringCycleDays: 7,
+      sunlight: '',
+      tip: '',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final mediaQuery = MediaQuery.of(context);
+    final query = _searchController.text.trim();
+    final results = _results;
+    final bottomSafeArea = mediaQuery.viewPadding.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+      child: SizedBox(
+        height: mediaQuery.size.height * 0.72,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.searchPlantPresetTitle,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: l10n.searchPlantType,
+                      hintText: l10n.searchPlantPresetHint,
+                      prefixIcon: const Icon(
+                        Icons.search_rounded,
+                        color: Color(0xFF5E6D64),
+                      ),
+                      suffixIcon: query.isEmpty
+                          ? null
+                          : IconButton(
+                              onPressed: () {
+                                setState(() {
+                                  _searchController.clear();
+                                });
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                      filled: true,
+                      fillColor: const Color(0xFFF8FBF8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFE3ECE6),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: const BorderSide(
+                          color: Color(0xFF2F855A),
+                          width: 1.4,
+                        ),
+                      ),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    l10n.presetSearchResultCount(results.length),
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: results.isNotEmpty
+                  ? ListView.separated(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        0,
+                        20,
+                        20 + bottomSafeArea,
+                      ),
+                      itemCount: results.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final preset = results[index];
+                        return InkWell(
+                          onTap: () => Navigator.of(context).pop(preset),
+                          borderRadius: BorderRadius.circular(18),
+                          child: _PlantPresetOptionTile(preset: preset),
+                        );
+                      },
+                    )
+                  : ListView(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        0,
+                        20,
+                        20 + bottomSafeArea,
+                      ),
+                      children: [
+                        _EmptyPresetSelectionCard(
+                          title: query.isEmpty
+                              ? l10n.registeredPresetMissing
+                              : l10n.noPresetFoundForKeyword(query),
+                          subtitle: query.isEmpty
+                              ? l10n.searchPlantPresetHint
+                              : l10n.noPlantTypeSelectedHint,
+                        ),
+                        const SizedBox(height: 12),
+                        if (query.isNotEmpty)
+                          FilledButton.icon(
+                            onPressed: () =>
+                                Navigator.of(context).pop(_manualPreset(query)),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(54),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                            ),
+                            icon: const Icon(Icons.edit_rounded),
+                            label: Text(l10n.registerTypedKeyword(query)),
+                          )
+                        else
+                          OutlinedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.info_outline_rounded),
+                            label: Text(l10n.manualRegisterPlantType),
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3395,12 +4317,13 @@ class PlantListCard extends StatelessWidget {
                 ],
               ),
             ),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 126,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 126,
+                  child: AspectRatio(
+                    aspectRatio: 1,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -3408,7 +4331,7 @@ class PlantListCard extends StatelessWidget {
                           PlantPhotoThumb(
                             assetId: plant.photoAssetIds.first,
                             width: 126,
-                            height: 220,
+                            height: 126,
                             borderRadius: 0,
                           )
                         else if (presetImageUrl != null &&
@@ -3417,23 +4340,19 @@ class PlantListCard extends StatelessWidget {
                             presetImageUrl!,
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) =>
-                                Container(
-                                  color: color.withValues(alpha: 0.14),
-                                  child: Icon(
-                                    Icons.local_florist_rounded,
-                                    color: color,
-                                    size: 42,
+                                _PlantImagePlaceholder(
+                                  background: BoxDecoration(
+                                    color: color.withValues(alpha: 0.14),
                                   ),
+                                  iconColor: color,
                                 ),
                           )
                         else
-                          Container(
-                            color: color.withValues(alpha: 0.14),
-                            child: Icon(
-                              Icons.local_florist_rounded,
-                              color: color,
-                              size: 42,
+                          _PlantImagePlaceholder(
+                            background: BoxDecoration(
+                              color: color.withValues(alpha: 0.14),
                             ),
+                            iconColor: color,
                           ),
                         DecoratedBox(
                           decoration: BoxDecoration(
@@ -3473,13 +4392,14 @@ class PlantListCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                           Text(
                             plant.name,
                             maxLines: 1,
@@ -3525,12 +4445,11 @@ class PlantListCard extends StatelessWidget {
                               height: 1.45,
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
@@ -3752,6 +4671,7 @@ class _HomeOverviewCard extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _DarkMetricTile extends StatelessWidget {
   const _DarkMetricTile({
     required this.label,
@@ -3796,6 +4716,7 @@ class _DarkMetricTile extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _SoftStatCard extends StatelessWidget {
   const _SoftStatCard({
     required this.title,
@@ -3953,6 +4874,8 @@ class HomeDashboardTab extends StatelessWidget {
   const HomeDashboardTab({
     super.key,
     required this.plants,
+    required this.presets,
+    required this.bottomPadding,
     required this.pinnedPlantId,
     required this.onTapPlant,
     required this.onMarkWatered,
@@ -3960,6 +4883,8 @@ class HomeDashboardTab extends StatelessWidget {
   });
 
   final List<PlantItem> plants;
+  final List<PlantPreset> presets;
+  final double bottomPadding;
   final String? pinnedPlantId;
   final ValueChanged<PlantItem> onTapPlant;
   final ValueChanged<PlantItem> onMarkWatered;
@@ -3969,6 +4894,10 @@ class HomeDashboardTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final sortedPlants = _sortPlantsByUrgency(plants);
+    final presetImageByType = {
+      for (final preset in presets)
+        if ((preset.imageUrl ?? '').isNotEmpty) preset.type: preset.imageUrl!,
+    };
     final urgentTasks = sortedPlants
         .where(
           (plant) =>
@@ -3991,7 +4920,7 @@ class HomeDashboardTab extends StatelessWidget {
         : soonTasks.take(3).toList();
 
     return ListView(
-      padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
+      padding: EdgeInsets.only(bottom: bottomPadding),
       children: [
         if (primaryPlant == null)
           Padding(
@@ -4001,6 +4930,7 @@ class HomeDashboardTab extends StatelessWidget {
         else
           _HomeImmersiveSection(
             plant: primaryPlant,
+            presetImageUrl: presetImageByType[primaryPlant.type],
             healthyCount: healthyCount,
             totalCount: plants.length,
             assignmentPanel: _HomeAssignmentPanel(
@@ -4051,28 +4981,25 @@ class _HomeFocusPlantCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (plant.photoAssetIds.isNotEmpty)
-                  PlantPhotoThumb(
-                    assetId: plant.photoAssetIds.first,
-                    width: double.infinity,
-                    height: 214,
-                    borderRadius: 0,
-                  )
-                else
-                  Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0xFFCBD9C7), Color(0xFF6F8D6D)],
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.local_florist_rounded,
-                      size: 72,
-                      color: Colors.white70,
+              if (plant.photoAssetIds.isNotEmpty)
+                PlantPhotoThumb(
+                  assetId: plant.photoAssetIds.first,
+                  width: double.infinity,
+                  height: 214,
+                  borderRadius: 0,
+                )
+              else
+                const _PlantImagePlaceholder(
+                  background: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFFCBD9C7), Color(0xFF6F8D6D)],
                     ),
                   ),
+                  iconColor: Colors.white70,
+                  iconSize: 58,
+                ),
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -4134,9 +5061,9 @@ class _HomeFocusPlantCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _HomeRoundMetric(
-                        icon: Icons.timeline_rounded,
-                        iconColor: const Color(0xFF2E4C6D),
-                        ringColor: const Color(0xFFBFD1EA),
+                        icon: Icons.park_rounded,
+                        iconColor: const Color(0xFF2F855A),
+                        ringColor: const Color(0xFFBFE3CE),
                         title: '정리된 식물',
                         value: '$healthyCount / $totalCount',
                         subtitle: '지금 안정 상태',
@@ -4145,9 +5072,9 @@ class _HomeFocusPlantCard extends StatelessWidget {
                     const SizedBox(width: 14),
                     Expanded(
                       child: _HomeRoundMetric(
-                        icon: Icons.south_rounded,
-                        iconColor: const Color(0xFFC7971E),
-                        ringColor: const Color(0xFFF1DEAE),
+                        icon: Icons.event_available_rounded,
+                        iconColor: const Color(0xFF2F855A),
+                        ringColor: const Color(0xFFBFE3CE),
                         title: '다음 물 주기',
                         value: plant.daysUntilWatering <= 0
                             ? '오늘'
@@ -4204,6 +5131,7 @@ class _HeroChip extends StatelessWidget {
 class _HomeImmersiveSection extends StatelessWidget {
   const _HomeImmersiveSection({
     required this.plant,
+    required this.presetImageUrl,
     required this.healthyCount,
     required this.totalCount,
     required this.assignmentPanel,
@@ -4211,6 +5139,7 @@ class _HomeImmersiveSection extends StatelessWidget {
   });
 
   final PlantItem plant;
+  final String? presetImageUrl;
   final int healthyCount;
   final int totalCount;
   final Widget assignmentPanel;
@@ -4230,28 +5159,42 @@ class _HomeImmersiveSection extends StatelessWidget {
           height: 260,
           child: Stack(
             fit: StackFit.expand,
-            children: [
-              if (plant.photoAssetIds.isNotEmpty)
-                PlantPhotoThumb(
-                  assetId: plant.photoAssetIds.first,
-                  width: double.infinity,
-                  height: 260,
-                  borderRadius: 0,
-                )
-              else
-                Container(
-                  decoration: const BoxDecoration(
+              children: [
+                if (plant.photoAssetIds.isNotEmpty)
+                  PlantPhotoThumb(
+                    assetId: plant.photoAssetIds.first,
+                    width: double.infinity,
+                    height: 260,
+                    borderRadius: 0,
+                  )
+                else if ((presetImageUrl ?? '').isNotEmpty)
+                  Image.network(
+                    presetImageUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const _PlantImagePlaceholder(
+                          background: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0xFFD7E2D2), Color(0xFF87A184)],
+                            ),
+                          ),
+                          iconColor: Colors.white70,
+                          iconSize: 58,
+                        ),
+                  )
+                else
+                  const _PlantImagePlaceholder(
+                    background: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [Color(0xFFD7E2D2), Color(0xFF87A184)],
                     ),
                   ),
-                  child: const Icon(
-                    Icons.local_florist_rounded,
-                    size: 72,
-                    color: Colors.white70,
-                  ),
+                  iconColor: Colors.white70,
+                  iconSize: 58,
                 ),
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -4326,9 +5269,9 @@ class _HomeImmersiveSection extends StatelessWidget {
                     children: [
                       Expanded(
                         child: _HomeRoundMetric(
-                          icon: Icons.timeline_rounded,
-                          iconColor: const Color(0xFF2E4C6D),
-                          ringColor: const Color(0xFFBFD1EA),
+                          icon: Icons.park_rounded,
+                          iconColor: const Color(0xFF2F855A),
+                          ringColor: const Color(0xFFBFE3CE),
                           title: '정리된 식물',
                           value: '$healthyCount / $totalCount',
                           subtitle: '지금 안정 상태',
@@ -4337,9 +5280,9 @@ class _HomeImmersiveSection extends StatelessWidget {
                       const SizedBox(width: 14),
                       Expanded(
                         child: _HomeRoundMetric(
-                          icon: Icons.south_rounded,
-                          iconColor: const Color(0xFFC7971E),
-                          ringColor: const Color(0xFFF1DEAE),
+                          icon: Icons.event_available_rounded,
+                          iconColor: const Color(0xFF2F855A),
+                          ringColor: const Color(0xFFBFE3CE),
                           title: '다음 물 주기',
                           value: plant.daysUntilWatering <= 0
                               ? '오늘'
@@ -4682,8 +5625,11 @@ class OrganizedMyPlantsTab extends StatefulWidget {
     super.key,
     required this.plants,
     required this.presets,
+    required this.bottomPadding,
     required this.onTapPlant,
     required this.onEditPlant,
+    required this.onWaterPlant,
+    required this.onRepotPlant,
     required this.pinnedPlantId,
     required this.onTogglePinnedPlant,
     required this.onAddPlant,
@@ -4691,8 +5637,11 @@ class OrganizedMyPlantsTab extends StatefulWidget {
 
   final List<PlantItem> plants;
   final List<PlantPreset> presets;
+  final double bottomPadding;
   final ValueChanged<PlantItem> onTapPlant;
-  final ValueChanged<PlantItem> onEditPlant;
+  final Future<void> Function(PlantItem) onEditPlant;
+  final ValueChanged<PlantItem> onWaterPlant;
+  final ValueChanged<PlantItem> onRepotPlant;
   final String? pinnedPlantId;
   final ValueChanged<PlantItem> onTogglePinnedPlant;
   final VoidCallback onAddPlant;
@@ -4735,6 +5684,8 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
             pinnedPlantId: widget.pinnedPlantId,
             onTapPlant: widget.onTapPlant,
             onEditPlant: widget.onEditPlant,
+            onWaterPlant: widget.onWaterPlant,
+            onRepotPlant: widget.onRepotPlant,
             onTogglePinnedPlant: widget.onTogglePinnedPlant,
           ),
       ],
@@ -4748,6 +5699,8 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
             pinnedPlantId: widget.pinnedPlantId,
             onTapPlant: widget.onTapPlant,
             onEditPlant: widget.onEditPlant,
+            onWaterPlant: widget.onWaterPlant,
+            onRepotPlant: widget.onRepotPlant,
             onTogglePinnedPlant: widget.onTogglePinnedPlant,
           ),
       ],
@@ -4769,7 +5722,7 @@ class _OrganizedMyPlantsTabState extends State<OrganizedMyPlantsTab> {
     return Padding(
       padding: const EdgeInsets.all(20),
       child: ListView(
-        padding: const EdgeInsets.only(bottom: _bottomOverlaySafePadding),
+        padding: EdgeInsets.only(bottom: widget.bottomPadding),
         children: [
           _MyPlantsBrowseHeader(
             selectedMode: _browseMode,
@@ -4889,6 +5842,129 @@ class _BrowseTabChip extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
+class _PlantManagerCard extends StatelessWidget {
+  const _PlantManagerCard({
+    required this.plant,
+    required this.isPinned,
+    required this.onTap,
+    required this.onEdit,
+    required this.onTogglePinned,
+  });
+
+  final PlantItem plant;
+  final bool isPinned;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onTogglePinned;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor(plant.status);
+    final badge = switch (plant.status) {
+      PlantStatus.overdue => '지금 필요',
+      PlantStatus.today => '지금 필요',
+      PlantStatus.soon => '곧 필요',
+      PlantStatus.healthy => '여유 있음',
+    };
+    final locationLabel = plant.location.trim().isEmpty
+        ? context.l10n.locationUnset
+        : plant.location.trim();
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(
+                width: 92,
+                height: 92,
+                child: plant.photoAssetIds.isNotEmpty
+                    ? PlantPhotoThumb(
+                        assetId: plant.photoAssetIds.first,
+                        width: 92,
+                        height: 92,
+                        borderRadius: 0,
+                      )
+                    : _PlantImagePlaceholder(
+                        background: BoxDecoration(
+                          color: color.withValues(alpha: 0.18),
+                        ),
+                        iconColor: color,
+                        iconSize: 24,
+                      ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    plant.name,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$badge${plant.status == PlantStatus.soon ? ' (${plant.daysUntilWatering}일 후)' : plant.status == PlantStatus.overdue ? ' (${plant.daysUntilWatering.abs()}일 지남)' : plant.status == PlantStatus.today ? ' (오늘)' : ''}',
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '마지막 물주기: ${DateTime.now().difference(plant.lastWateredAt).inDays}일 전',
+                    style: const TextStyle(color: Colors.black54),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${plant.type} · $locationLabel',
+                    style: const TextStyle(color: Colors.black45),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              children: [
+                IconButton(
+                  onPressed: onTogglePinned,
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    isPinned
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: isPinned
+                        ? const Color(0xFFD95C45)
+                        : const Color(0xFF8DA08E),
+                  ),
+                ),
+                IconButton(
+                  onPressed: onEdit,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.edit_rounded),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PlantGroupCard extends StatelessWidget {
   const _PlantGroupCard({
     required this.title,
@@ -4898,6 +5974,8 @@ class _PlantGroupCard extends StatelessWidget {
     required this.pinnedPlantId,
     required this.onTapPlant,
     required this.onEditPlant,
+    required this.onWaterPlant,
+    required this.onRepotPlant,
     required this.onTogglePinnedPlant,
   });
 
@@ -4907,7 +5985,9 @@ class _PlantGroupCard extends StatelessWidget {
   final Map<String, String> presetImageByType;
   final String? pinnedPlantId;
   final ValueChanged<PlantItem> onTapPlant;
-  final ValueChanged<PlantItem> onEditPlant;
+  final Future<void> Function(PlantItem) onEditPlant;
+  final ValueChanged<PlantItem> onWaterPlant;
+  final ValueChanged<PlantItem> onRepotPlant;
   final ValueChanged<PlantItem> onTogglePinnedPlant;
 
   @override
@@ -4927,6 +6007,9 @@ class _PlantGroupCard extends StatelessWidget {
           _GroupPhotoStrip(
             plants: plants,
             presetImageByType: presetImageByType,
+            onEditPlant: onEditPlant,
+            onWaterPlant: onWaterPlant,
+            onRepotPlant: onRepotPlant,
           ),
           const SizedBox(height: 14),
           Row(
@@ -4951,20 +6034,24 @@ class _PlantGroupCard extends StatelessWidget {
                 ),
               ),
               if (urgentCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFE7E2),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '체크 $urgentCount개',
-                    style: const TextStyle(
-                      color: Color(0xFFD95C45),
-                      fontWeight: FontWeight.w700,
+                Tooltip(
+                  message: '지금 안정 상태가 아닌 식물 수예요. 먼저 확인하면 좋아요.',
+                  triggerMode: TooltipTriggerMode.tap,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFE7E2),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '체크 $urgentCount개',
+                      style: const TextStyle(
+                        color: Color(0xFFD95C45),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -5033,83 +6120,852 @@ class _GroupPhotoStrip extends StatelessWidget {
   const _GroupPhotoStrip({
     required this.plants,
     required this.presetImageByType,
+    required this.onEditPlant,
+    required this.onWaterPlant,
+    required this.onRepotPlant,
   });
 
   final List<PlantItem> plants;
   final Map<String, String> presetImageByType;
+  final Future<void> Function(PlantItem) onEditPlant;
+  final ValueChanged<PlantItem> onWaterPlant;
+  final ValueChanged<PlantItem> onRepotPlant;
 
   @override
   Widget build(BuildContext context) {
-    final photoEntries = <_PlantPhotoEntry>[
-      for (final plant in plants)
-        for (final assetId in plant.photoAssetIds)
-          _PlantPhotoEntry(plant: plant, assetId: assetId),
-    ];
-    final previewEntries = photoEntries.take(4).toList();
-    final fallbackPlants = plants.take(4).toList();
+    final previewItems = plants
+        .take(4)
+        .map(
+          (plant) => _GroupPreviewItem(
+            plant: plant,
+            assetId: plant.photoAssetIds.isNotEmpty
+                ? plant.photoAssetIds.first
+                : null,
+          ),
+        )
+        .toList(growable: false);
+    final hiddenCount = plants.length > 4 ? plants.length - 4 : 0;
+    final itemCount = previewItems.length;
+    if (itemCount == 0) {
+      return const SizedBox.shrink();
+    }
 
-    return SizedBox(
-      height: 152,
-      child: Row(
-        children: [
-          for (
-            var i = 0;
-            i <
-                (previewEntries.isNotEmpty
-                    ? previewEntries.length
-                    : fallbackPlants.length);
-            i++
-          ) ...[
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: previewEntries.isNotEmpty
-                    ? PlantPhotoThumb(
-                        assetId: previewEntries[i].assetId,
-                        width: double.infinity,
-                        height: 152,
-                        borderRadius: 0,
-                      )
-                    : ((presetImageByType[fallbackPlants[i].type] ?? '')
-                              .isNotEmpty
-                          ? Image.network(
-                              presetImageByType[fallbackPlants[i].type]!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Container(
-                                    color: _statusColor(
-                                      fallbackPlants[i].status,
-                                    ).withValues(alpha: 0.18),
-                                    child: Icon(
-                                      Icons.local_florist_rounded,
-                                      color: _statusColor(
-                                        fallbackPlants[i].status,
-                                      ),
-                                      size: 36,
-                                    ),
-                                  ),
-                            )
-                          : Container(
-                              color: _statusColor(
-                                fallbackPlants[i].status,
-                              ).withValues(alpha: 0.18),
-                              child: Icon(
-                                Icons.local_florist_rounded,
-                                color: _statusColor(fallbackPlants[i].status),
-                                size: 36,
-                              ),
-                            )),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.maxWidth.isFinite || constraints.maxWidth <= 0) {
+          return const SizedBox(
+            height: 152,
+            child: ColoredBox(color: Colors.transparent),
+          );
+        }
+
+        const gap = 8.0;
+        final rawHeight = switch (itemCount) {
+          1 => constraints.maxWidth,
+          2 || 3 || 4 => (constraints.maxWidth - gap) / 2,
+          _ => (constraints.maxWidth - (gap * 2)) / 3,
+        };
+        final double mosaicHeight = rawHeight.clamp(96.0, 240.0);
+
+        if (!mosaicHeight.isFinite || mosaicHeight <= 0) {
+          return const SizedBox(
+            height: 152,
+            child: ColoredBox(color: Colors.transparent),
+          );
+        }
+
+        return SizedBox(
+          height: mosaicHeight,
+          child: _buildMosaic(
+            context,
+            items: previewItems,
+            presetImageByType: presetImageByType,
+            hiddenCount: hiddenCount,
+            gap: gap,
+            height: mosaicHeight,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMosaic(
+    BuildContext context, {
+    required List<_GroupPreviewItem> items,
+    required Map<String, String> presetImageByType,
+    required int hiddenCount,
+    required double gap,
+    required double height,
+  }) {
+    Widget tile(
+      _GroupPreviewItem item, {
+      required bool isLastVisible,
+      BorderRadius radius = const BorderRadius.all(Radius.circular(20)),
+    }) {
+      return _GroupPreviewTile(
+        item: item,
+        presetImageUrl: presetImageByType[item.plant.type],
+        borderRadius: radius,
+        hiddenCount: isLastVisible ? hiddenCount : 0,
+        onTap: () {
+          final initialIndex = items.indexOf(item);
+          if (initialIndex < 0) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => _MyPlantPhotoViewerPage(
+                items: items,
+                presetImageByType: presetImageByType,
+                initialIndex: initialIndex,
+                onEditPlant: onEditPlant,
+                onWaterPlant: onWaterPlant,
+                onRepotPlant: onRepotPlant,
               ),
             ),
-            if (i !=
-                (previewEntries.isNotEmpty
-                        ? previewEntries.length
-                        : fallbackPlants.length) -
-                    1)
-              const SizedBox(width: 8),
+          );
+        },
+      );
+    }
+
+    switch (items.length) {
+      case 1:
+        return tile(items[0], isLastVisible: true);
+      case 2:
+        return Row(
+          children: [
+            Expanded(child: tile(items[0], isLastVisible: false)),
+            SizedBox(width: gap),
+            Expanded(child: tile(items[1], isLastVisible: true)),
           ],
+        );
+      case 3:
+        return Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: tile(items[0], isLastVisible: false),
+            ),
+            SizedBox(width: gap),
+            Expanded(
+              flex: 1,
+              child: Column(
+                children: [
+                  Expanded(child: tile(items[1], isLastVisible: false)),
+                  SizedBox(height: gap),
+                  Expanded(child: tile(items[2], isLastVisible: true)),
+                ],
+              ),
+            ),
+          ],
+        );
+      case 4:
+        return Row(
+          children: [
+            Expanded(child: tile(items[0], isLastVisible: false)),
+            SizedBox(width: gap),
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(child: tile(items[1], isLastVisible: false)),
+                  SizedBox(height: gap),
+                  Expanded(child: tile(items[2], isLastVisible: false)),
+                ],
+              ),
+            ),
+            SizedBox(width: gap),
+            Expanded(child: tile(items[3], isLastVisible: true)),
+          ],
+        );
+      default:
+        return Row(
+          children: [
+            Expanded(child: tile(items[0], isLastVisible: false)),
+            SizedBox(width: gap),
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(child: tile(items[1], isLastVisible: false)),
+                  SizedBox(height: gap),
+                  Expanded(child: tile(items[2], isLastVisible: false)),
+                ],
+              ),
+            ),
+            SizedBox(width: gap),
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(child: tile(items[3], isLastVisible: false)),
+                  SizedBox(height: gap),
+                  Expanded(child: tile(items[4], isLastVisible: true)),
+                ],
+              ),
+            ),
+          ],
+        );
+    }
+  }
+}
+
+class _GroupPreviewItem {
+  const _GroupPreviewItem({
+    required this.plant,
+    this.assetId,
+  });
+
+  final PlantItem plant;
+  final String? assetId;
+}
+
+class _GroupPreviewTile extends StatelessWidget {
+  const _GroupPreviewTile({
+    required this.item,
+    required this.presetImageUrl,
+    required this.borderRadius,
+    required this.hiddenCount,
+    required this.onTap,
+  });
+
+  final _GroupPreviewItem item;
+  final String? presetImageUrl;
+  final BorderRadius borderRadius;
+  final int hiddenCount;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _statusColor(item.plant.status);
+    const overlayFontSize = 24.0;
+    final child = LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : 120.0;
+        final tileHeight =
+            constraints.maxHeight.isFinite && constraints.maxHeight > 0
+            ? constraints.maxHeight
+            : tileWidth;
+
+        return ClipRRect(
+          borderRadius: borderRadius,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if ((item.assetId ?? '').isNotEmpty)
+                PlantPhotoThumb(
+                  assetId: item.assetId!,
+                  width: tileWidth,
+                  height: tileHeight,
+                  borderRadius: 0,
+                )
+              else if ((presetImageUrl ?? '').isNotEmpty)
+                Image.network(
+                  presetImageUrl!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _PlantImagePlaceholder(
+                        background: BoxDecoration(
+                          color: color.withValues(alpha: 0.18),
+                        ),
+                        iconColor: color,
+                        iconSize: 28,
+                      ),
+                )
+              else
+                _PlantImagePlaceholder(
+                  background: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                  ),
+                  iconColor: color,
+                  iconSize: 28,
+                ),
+              if (hiddenCount > 0)
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.42),
+                  ),
+                  child: Center(
+                    child: Text(
+                      hiddenCount > 99 ? '99+' : '+$hiddenCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: overlayFontSize,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (onTap == null) {
+      return child;
+    }
+    return InkWell(
+      onTap: onTap,
+      borderRadius: borderRadius,
+      child: child,
+    );
+  }
+}
+
+class _MyPlantPhotoViewerPage extends StatefulWidget {
+  const _MyPlantPhotoViewerPage({
+    required this.items,
+    required this.presetImageByType,
+    required this.initialIndex,
+    required this.onEditPlant,
+    required this.onWaterPlant,
+    required this.onRepotPlant,
+  });
+
+  final List<_GroupPreviewItem> items;
+  final Map<String, String> presetImageByType;
+  final int initialIndex;
+  final Future<void> Function(PlantItem) onEditPlant;
+  final ValueChanged<PlantItem> onWaterPlant;
+  final ValueChanged<PlantItem> onRepotPlant;
+
+  @override
+  State<_MyPlantPhotoViewerPage> createState() => _MyPlantPhotoViewerPageState();
+}
+
+class _MyPlantPhotoViewerPageState extends State<_MyPlantPhotoViewerPage> {
+  late final PageController _controller;
+  late final List<_GroupPreviewItem> _items;
+  late final Map<String, int> _selectedPhotoIndexByPlantId;
+  late int _currentIndex;
+  bool _isChromeVisible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _controller = PageController(initialPage: widget.initialIndex);
+    _items = widget.items
+        .map(
+          (item) => _GroupPreviewItem(
+            plant: item.plant.copy(),
+            assetId: item.assetId,
+          ),
+        )
+        .toList(growable: false);
+    _selectedPhotoIndexByPlantId = {
+      for (final item in _items)
+        item.plant.id: _initialPhotoIndexFor(item),
+    };
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  int _initialPhotoIndexFor(_GroupPreviewItem item) {
+    if (item.assetId == null || item.assetId!.isEmpty) {
+      return 0;
+    }
+    final index = item.plant.photoAssetIds.indexOf(item.assetId!);
+    return index < 0 ? 0 : index;
+  }
+
+  List<String> _galleryAssetIds(PlantItem plant) {
+    return List<String>.from(plant.photoAssetIds);
+  }
+
+  int _selectedPhotoIndex(PlantItem plant) {
+    final assetIds = _galleryAssetIds(plant);
+    if (assetIds.isEmpty) {
+      return 0;
+    }
+    final rawIndex = _selectedPhotoIndexByPlantId[plant.id] ?? 0;
+    if (rawIndex < 0) {
+      return 0;
+    }
+    if (rawIndex >= assetIds.length) {
+      return assetIds.length - 1;
+    }
+    return rawIndex;
+  }
+
+  void _selectPhoto(PlantItem plant, int index) {
+    setState(() {
+      _selectedPhotoIndexByPlantId[plant.id] = index;
+    });
+  }
+
+  void _handleWatered() {
+    final plant = _items[_currentIndex].plant;
+    widget.onWaterPlant(plant);
+    setState(() {
+      plant.lastWateredAt = DateTime.now();
+    });
+  }
+
+  void _handleRepotted() {
+    widget.onRepotPlant(_items[_currentIndex].plant);
+  }
+
+  Future<void> _handleEdit() async {
+    final plant = _items[_currentIndex].plant;
+    Navigator.of(context).pop();
+    await widget.onEditPlant(plant);
+  }
+
+  void _toggleChrome() {
+    setState(() {
+      _isChromeVisible = !_isChromeVisible;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final item = _items[_currentIndex];
+    final plant = item.plant;
+    final assetIds = _galleryAssetIds(plant);
+    final selectedPhotoIndex = _selectedPhotoIndex(plant);
+    final currentAssetId = assetIds.isEmpty ? null : assetIds[selectedPhotoIndex];
+    final location = plant.location.trim().isEmpty
+        ? l10n.locationUnset
+        : plant.location.trim();
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: _items.length,
+            onPageChanged: (index) {
+              setState(() {
+                _currentIndex = index;
+                _isChromeVisible = true;
+              });
+            },
+            itemBuilder: (context, index) {
+              final previewItem = _items[index];
+              final presetImageUrl =
+                  widget.presetImageByType[previewItem.plant.type];
+              final previewAssetIds = _galleryAssetIds(previewItem.plant);
+              final previewSelectedIndex = _selectedPhotoIndex(previewItem.plant);
+              final previewAssetId = previewAssetIds.isEmpty
+                  ? null
+                  : previewAssetIds[previewSelectedIndex];
+              final mediaKey = ValueKey(
+                '${previewItem.plant.id}:${previewAssetId ?? presetImageUrl ?? 'fallback'}',
+              );
+              return Center(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleChrome,
+                  child: InteractiveViewer(
+                    child: KeyedSubtree(
+                      key: mediaKey,
+                      child: SizedBox(
+                        width: MediaQuery.of(context).size.width,
+                        height: MediaQuery.of(context).size.height * 0.72,
+                        child: (previewAssetId ?? '').isNotEmpty
+                            ? _ViewerAssetImage(
+                                key: mediaKey,
+                                assetId: previewAssetId!,
+                                width: MediaQuery.of(context).size.width,
+                                height: MediaQuery.of(context).size.height * 0.72,
+                              )
+                            : ((presetImageUrl ?? '').isNotEmpty
+                                  ? Image.network(
+                                      presetImageUrl!,
+                                      key: mediaKey,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) =>
+                                          _PlantImagePlaceholder(
+                                            background: BoxDecoration(
+                                              color: _statusColor(
+                                                previewItem.plant.status,
+                                              ).withValues(alpha: 0.18),
+                                            ),
+                                            iconColor: _statusColor(
+                                              previewItem.plant.status,
+                                            ),
+                                            iconSize: 42,
+                                          ),
+                                    )
+                                  : _PlantImagePlaceholder(
+                                      background: BoxDecoration(
+                                        color: _statusColor(
+                                          previewItem.plant.status,
+                                        ).withValues(alpha: 0.18),
+                                      ),
+                                      iconColor: _statusColor(
+                                        previewItem.plant.status,
+                                      ),
+                                      iconSize: 42,
+                                    )),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              ignoring: !_isChromeVisible,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 220),
+                opacity: _isChromeVisible ? 1 : 0,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    12,
+                    8 + MediaQuery.of(context).viewPadding.top,
+                    12,
+                    12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.62),
+                        Colors.black.withValues(alpha: 0),
+                      ],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          l10n.photoIndexLabel(_currentIndex + 1, _items.length),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 48),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              ignoring: !_isChromeVisible,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 220),
+                opacity: _isChromeVisible ? 1 : 0,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    28,
+                    20,
+                    20 + MediaQuery.of(context).viewPadding.bottom,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0),
+                        Colors.black.withValues(alpha: 0.76),
+                      ],
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (assetIds.length > 1) ...[
+                        SizedBox(
+                          height: 74,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: assetIds.length,
+                            separatorBuilder: (context, index) =>
+                                const SizedBox(width: 10),
+                            itemBuilder: (context, index) {
+                              final isSelected = index == selectedPhotoIndex;
+                              return GestureDetector(
+                                onTap: () => _selectPhoto(plant, index),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 160),
+                                  width: 74,
+                                  height: 74,
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.white.withValues(alpha: 0.24),
+                                      width: isSelected ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(15),
+                                    child: PlantPhotoThumb(
+                                      key: ValueKey(
+                                        '${plant.id}:${assetIds[index]}:$index',
+                                      ),
+                                      assetId: assetIds[index],
+                                      width: 70,
+                                      height: 70,
+                                      borderRadius: 0,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: _handleWatered,
+                              icon: const Icon(Icons.water_drop_outlined),
+                              label: Text(l10n.markWatered),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                backgroundColor: const Color(0xFF5CA96B),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _handleRepotted,
+                              icon: const Icon(Icons.inventory_2_outlined),
+                              label: Text(l10n.repotDone),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
+                                foregroundColor: Colors.white,
+                                side: BorderSide(
+                                  color: Colors.white.withValues(alpha: 0.78),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              plant.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: _handleEdit,
+                            visualDensity: VisualDensity.compact,
+                            tooltip: l10n.edit,
+                            icon: const Icon(
+                              Icons.edit_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${plant.type} · $location',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                      if (currentAssetId != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          l10n.photoPositionLabel(
+                            selectedPhotoIndex + 1,
+                            assetIds.length,
+                          ),
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      StatusChip(status: plant.status),
+                      const SizedBox(height: 10),
+                      Text(
+                        _dateLabel(plant.nextWateringAt),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _ViewerAssetImage extends StatefulWidget {
+  const _ViewerAssetImage({
+    super.key,
+    required this.assetId,
+    required this.width,
+    required this.height,
+  });
+
+  final String assetId;
+  final double width;
+  final double height;
+
+  @override
+  State<_ViewerAssetImage> createState() => _ViewerAssetImageState();
+}
+
+class _ViewerAssetImageState extends State<_ViewerAssetImage> {
+  static final Map<String, Future<AssetEntity?>> _entityFutures =
+      <String, Future<AssetEntity?>>{};
+  static final Map<String, Future<Uint8List?>> _thumbFutures =
+      <String, Future<Uint8List?>>{};
+
+  Uint8List? _currentBytes;
+  bool _isLoading = true;
+  String? _activeAssetId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAsset();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ViewerAssetImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assetId != widget.assetId ||
+        oldWidget.width != widget.width ||
+        oldWidget.height != widget.height) {
+      _loadAsset();
+    }
+  }
+
+  Future<void> _loadAsset() async {
+    final assetId = widget.assetId;
+    _activeAssetId = assetId;
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+
+    final cacheWidth = widget.width.isFinite
+        ? widget.width.round().clamp(1, 2048)
+        : 1080;
+    final cacheHeight = widget.height.isFinite
+        ? widget.height.round().clamp(1, 2048)
+        : 1440;
+    final entityFuture = _entityFutures.putIfAbsent(
+      assetId,
+      () => AssetEntity.fromId(assetId),
+    );
+    final entity = await entityFuture;
+    if (!mounted || _activeAssetId != assetId) {
+      return;
+    }
+    if (entity == null) {
+      setState(() {
+        _currentBytes = null;
+        _isLoading = false;
+      });
+      return;
+    }
+
+    final thumbKey = '$assetId:$cacheWidth:$cacheHeight';
+    final thumbFuture = _thumbFutures.putIfAbsent(
+      thumbKey,
+      () => entity.thumbnailDataWithSize(
+        ThumbnailSize(cacheWidth, cacheHeight),
+      ),
+    );
+    final data = await thumbFuture;
+    if (!mounted || _activeAssetId != assetId) {
+      return;
+    }
+    setState(() {
+      _currentBytes = data;
+      _isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (_currentBytes != null)
+          Image.memory(
+            _currentBytes!,
+            width: widget.width,
+            height: widget.height,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+          )
+        else
+          const ColoredBox(color: Colors.black),
+        if (_isLoading)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.18),
+            ),
+            child: const Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

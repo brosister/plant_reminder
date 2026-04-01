@@ -10,11 +10,13 @@ class PlantDetailPage extends StatelessWidget {
     required this.plant,
     required this.onEdit,
     required this.onWatered,
+    required this.onRepotted,
   });
 
   final PlantItem plant;
   final VoidCallback onEdit;
   final VoidCallback onWatered;
+  final VoidCallback onRepotted;
 
   @override
   Widget build(BuildContext context) {
@@ -119,14 +121,36 @@ class PlantDetailPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: onWatered,
-            icon: const Icon(Icons.water_drop_outlined),
-            label: Text(l10n.markWatered),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(54),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onWatered,
+                  icon: const Icon(Icons.water_drop_outlined),
+                  label: Text(l10n.markWatered),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(54),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onRepotted,
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: Text(l10n.repotDone),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(54),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

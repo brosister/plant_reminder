@@ -61,6 +61,7 @@ class PlantPhotoThumb extends StatelessWidget {
   }
 
   Widget _fallback() {
+    final iconSize = (width < height ? width : height) * 0.38;
     return Container(
       width: width,
       height: height,
@@ -68,7 +69,21 @@ class PlantPhotoThumb extends StatelessWidget {
         color: const Color(0xFFE5E7EB),
         borderRadius: BorderRadius.circular(borderRadius),
       ),
-      child: const Icon(Icons.local_florist, color: Color(0xFF2F855A)),
+      child: Center(
+        child: Container(
+          width: iconSize * 1.7,
+          height: iconSize * 1.7,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(iconSize),
+          ),
+          child: Icon(
+            Icons.local_florist,
+            color: const Color(0xFF2F855A),
+            size: iconSize,
+          ),
+        ),
+      ),
     );
   }
 }
