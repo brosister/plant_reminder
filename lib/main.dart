@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -788,6 +789,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
         presets: _plantPresets,
         bottomPadding: bottomOverlayPadding,
         pinnedPlantId: _settings.pinnedHomePlantId,
+        onAddPlant: _openAddPlantSheet,
         onTapPlant: _openPlantDetail,
         onMarkWatered: _markWatered,
         onMarkAllWatered: _markPlantsWatered,
@@ -1103,16 +1105,13 @@ class HomeTab extends StatelessWidget {
                   Container(
                     width: 52,
                     height: 52,
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF1DFC7),
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Image.asset(
+                    child: Image.asset(
                         'assets/branding/app_logo.png',
-                        fit: BoxFit.contain,
-                      ),
+                        fit: BoxFit.cover,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1642,11 +1641,8 @@ class _CalendarTabState extends State<CalendarTab> {
     return ListView(
       padding: EdgeInsets.fromLTRB(20, 20, 20, widget.bottomPadding),
       children: [
-        _GlassPanel(
-          padding: const EdgeInsets.all(18),
-          borderRadius: 30,
-          blurSigma: 14,
-          backgroundColor: Colors.white.withValues(alpha: 0.46),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1703,7 +1699,7 @@ class _CalendarTabState extends State<CalendarTab> {
               ),
               const SizedBox(height: 18),
               SizedBox(
-                height: 110,
+                height: 132,
                 child: PageView.builder(
                   controller: _weekPageController,
                   onPageChanged: (page) {
@@ -1724,26 +1720,29 @@ class _CalendarTabState extends State<CalendarTab> {
                       7,
                       (index) => pageWeekStart.add(Duration(days: index)),
                     );
-                    return Row(
-                      children: [
-                        for (var i = 0; i < pageWeekDays.length; i++) ...[
-                          if (i > 0) const SizedBox(width: 8),
-                          Expanded(
-                            child: _CalendarDayCell(
-                              date: pageWeekDays[i],
-                              isToday: _isSameDate(pageWeekDays[i], DateTime.now()),
-                              isSelected: _isSameDate(pageWeekDays[i], _selectedDate),
-                              dueCount: _dueCountForDay(pageWeekDays[i]),
-                              onTap: () {
-                                setState(() {
-                                  _selectedDate = pageWeekDays[i];
-                                  _weekStart = pageWeekStart;
-                                });
-                              },
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Row(
+                        children: [
+                          for (var i = 0; i < pageWeekDays.length; i++) ...[
+                            if (i > 0) const SizedBox(width: 8),
+                            Expanded(
+                              child: _CalendarDayCell(
+                                date: pageWeekDays[i],
+                                isToday: _isSameDate(pageWeekDays[i], DateTime.now()),
+                                isSelected: _isSameDate(pageWeekDays[i], _selectedDate),
+                                dueCount: _dueCountForDay(pageWeekDays[i]),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedDate = pageWeekDays[i];
+                                    _weekStart = pageWeekStart;
+                                  });
+                                },
+                              ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
+                      ),
                     );
                   },
                 ),
@@ -1961,22 +1960,22 @@ class _CalendarDayCell extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected
               ? const Color(0xFF2F855A).withValues(alpha: 0.92)
-              : Colors.white.withValues(alpha: 0.38),
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
             color: isSelected
                 ? const Color(0xFF2F855A)
-                : Colors.white.withValues(alpha: 0.65),
+                : Colors.transparent,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: isSelected
-                  ? const Color(0x332F855A)
-                  : const Color(0x11000000),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: isSelected
+              ? const [
+                  BoxShadow(
+                    color: Color(0x332F855A),
+                    blurRadius: 18,
+                    offset: Offset(0, 8),
+                  ),
+                ]
+              : null,
         ),
         child: Column(
           children: [
@@ -4915,6 +4914,7 @@ class HomeDashboardTab extends StatelessWidget {
     required this.presets,
     required this.bottomPadding,
     required this.pinnedPlantId,
+    required this.onAddPlant,
     required this.onTapPlant,
     required this.onMarkWatered,
     required this.onMarkAllWatered,
@@ -4924,6 +4924,7 @@ class HomeDashboardTab extends StatelessWidget {
   final List<PlantPreset> presets;
   final double bottomPadding;
   final String? pinnedPlantId;
+  final VoidCallback onAddPlant;
   final ValueChanged<PlantItem> onTapPlant;
   final ValueChanged<PlantItem> onMarkWatered;
   final ValueChanged<List<PlantItem>> onMarkAllWatered;
@@ -4954,35 +4955,143 @@ class HomeDashboardTab extends StatelessWidget {
         ? urgentTasks
         : soonTasks.take(3).toList();
 
+    if (primaryPlant == null) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final availableHeight = constraints.maxHeight.isFinite
+              ? constraints.maxHeight
+              : MediaQuery.sizeOf(context).height;
+          final emptyStateHeight = math.max(
+            0.0,
+            availableHeight - bottomPadding - 120,
+          );
+
+          return ListView(
+            padding: EdgeInsets.fromLTRB(20, 120, 20, bottomPadding),
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(minHeight: emptyStateHeight),
+                child: Center(
+                  child: _HomeEmptyState(
+                    title: l10n.noPlantsYet,
+                    guideText: l10n.myPlantsGuide,
+                    buttonLabel: l10n.newPlantRegister,
+                    onAddPlant: onAddPlant,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
     return ListView(
       padding: EdgeInsets.only(bottom: bottomPadding),
       children: [
-        if (primaryPlant == null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: EmptyCard(message: l10n.noPlantsYet),
-          )
-        else
-          _HomeImmersiveSection(
-            plant: primaryPlant,
-            presetImageUrl: _plantPresetImageUrl(
-              presetImageByType,
-              primaryPlant,
-            ),
-            healthyCount: healthyCount,
-            totalCount: plants.length,
-            assignmentPanel: _HomeAssignmentPanel(
-              tasks: focusTasks,
-              hasUrgentTasks: urgentTasks.isNotEmpty,
-              onTapPlant: onTapPlant,
-              onMarkWatered: onMarkWatered,
-              onMarkAllWatered: () => onMarkAllWatered(urgentTasks),
-            ),
-            bottomPanel: soonTasks.isNotEmpty
-                ? _HomeSoonPanel(plants: soonTasks, onTapPlant: onTapPlant)
-                : _HomeCalmPanel(healthyCount: healthyCount),
+        _HomeImmersiveSection(
+          plant: primaryPlant,
+          presetImageUrl: _plantPresetImageUrl(
+            presetImageByType,
+            primaryPlant,
           ),
+          healthyCount: healthyCount,
+          totalCount: plants.length,
+          assignmentPanel: _HomeAssignmentPanel(
+            tasks: focusTasks,
+            hasUrgentTasks: urgentTasks.isNotEmpty,
+            onTapPlant: onTapPlant,
+            onMarkWatered: onMarkWatered,
+            onMarkAllWatered: () => onMarkAllWatered(urgentTasks),
+          ),
+          bottomPanel: soonTasks.isNotEmpty
+              ? _HomeSoonPanel(plants: soonTasks, onTapPlant: onTapPlant)
+              : _HomeCalmPanel(healthyCount: healthyCount),
+        ),
       ],
+    );
+  }
+}
+
+class _HomeEmptyState extends StatelessWidget {
+  const _HomeEmptyState({
+    required this.title,
+    required this.guideText,
+    required this.buttonLabel,
+    required this.onAddPlant,
+  });
+
+  final String title;
+  final String guideText;
+  final String buttonLabel;
+  final VoidCallback onAddPlant;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF7FBF7), Color(0xFFEAF5EE)],
+        ),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: const Color(0xFFDCEADF)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 88,
+            height: 88,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Image.asset(
+                'assets/branding/app_logo.png',
+                fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              height: 1.25,
+              color: Color(0xFF122018),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            guideText,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.black54, height: 1.5),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onAddPlant,
+            icon: const Icon(Icons.add_rounded),
+            label: Text(buttonLabel),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2F855A),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              textStyle: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

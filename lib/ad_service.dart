@@ -38,6 +38,10 @@ class AdService {
   AdService._();
 
   static const String _baseUrl = 'https://app-master.officialsite.kr';
+  static const String _defaultIosBannerAdId =
+      'ca-app-pub-1472588829285826/2199935347';
+  static const String _defaultIosInterstitialAdId =
+      'ca-app-pub-1472588829285826/2016102510';
   static AdSettings? _settings;
   static bool _initialized = false;
   static int _meaningfulActionCount = 0;
@@ -47,7 +51,7 @@ class AdService {
   static Future<void> init() async {
     if (_initialized) return;
     await MobileAds.instance.initialize();
-    _settings = await fetchSettings();
+    _settings = await fetchSettings() ?? _fallbackSettings();
     _initialized = true;
   }
 
@@ -57,10 +61,38 @@ class AdService {
       if (response.statusCode != 200) return null;
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       if (decoded['success'] != true || decoded['data'] == null) return null;
-      return AdSettings.fromJson(Map<String, dynamic>.from(decoded['data'] as Map));
+      final remoteSettings = AdSettings.fromJson(
+        Map<String, dynamic>.from(decoded['data'] as Map),
+      );
+      return _mergeWithFallback(remoteSettings);
     } catch (_) {
       return null;
     }
+  }
+
+  static AdSettings _fallbackSettings() {
+    return const AdSettings(
+      adMode: 'live',
+      iosBannerAdId: _defaultIosBannerAdId,
+      iosInterstitialAdId: _defaultIosInterstitialAdId,
+      androidBannerAdId: '',
+      androidInterstitialAdId: '',
+    );
+  }
+
+  static AdSettings _mergeWithFallback(AdSettings remoteSettings) {
+    final fallback = _fallbackSettings();
+    return AdSettings(
+      adMode: remoteSettings.adMode,
+      iosBannerAdId: remoteSettings.iosBannerAdId.isEmpty
+          ? fallback.iosBannerAdId
+          : remoteSettings.iosBannerAdId,
+      iosInterstitialAdId: remoteSettings.iosInterstitialAdId.isEmpty
+          ? fallback.iosInterstitialAdId
+          : remoteSettings.iosInterstitialAdId,
+      androidBannerAdId: remoteSettings.androidBannerAdId,
+      androidInterstitialAdId: remoteSettings.androidInterstitialAdId,
+    );
   }
 
   static Future<BannerAd?> loadBanner(int screenWidth) async {
