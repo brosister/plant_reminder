@@ -22,7 +22,7 @@ class SettingsDialog extends StatefulWidget {
   final bool isSigningIn;
   final AppSettings settings;
   final Future<void> Function() onSendTestNotification;
-  final Future<void> Function() onSignInPressed;
+  final Future<AppAuthUser?> Function() onSignInPressed;
   final Future<void> Function() onSignOutPressed;
   final Future<void> Function(AppSettings settings) onSettingsChanged;
 
@@ -32,11 +32,15 @@ class SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<SettingsDialog> {
   late AppSettings _draftSettings;
+  AppAuthUser? _authUser;
+  late bool _isSigningIn;
 
   @override
   void initState() {
     super.initState();
     _draftSettings = widget.settings;
+    _authUser = widget.authUser;
+    _isSigningIn = widget.isSigningIn;
   }
 
   @override
@@ -45,6 +49,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
     if (oldWidget.settings != widget.settings) {
       _draftSettings = widget.settings;
     }
+    if (oldWidget.authUser != widget.authUser) {
+      _authUser = widget.authUser;
+    }
+    if (oldWidget.isSigningIn != widget.isSigningIn) {
+      _isSigningIn = widget.isSigningIn;
+    }
   }
 
   Future<void> _handleSettingsChanged(AppSettings settings) async {
@@ -52,6 +62,34 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _draftSettings = settings;
     });
     await widget.onSettingsChanged(settings);
+  }
+
+  Future<void> _handleSignInPressed() async {
+    if (_isSigningIn) return;
+    setState(() {
+      _isSigningIn = true;
+    });
+    try {
+      final user = await widget.onSignInPressed();
+      if (!mounted) return;
+      setState(() {
+        _authUser = user ?? _authUser;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSigningIn = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleSignOutPressed() async {
+    await widget.onSignOutPressed();
+    if (!mounted) return;
+    setState(() {
+      _authUser = null;
+    });
   }
 
   @override
@@ -102,10 +140,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 child: TabBarView(
                   children: [
                     _AccountSettingsTab(
-                      authUser: widget.authUser,
-                      isSigningIn: widget.isSigningIn,
-                      onSignInPressed: widget.onSignInPressed,
-                      onSignOutPressed: widget.onSignOutPressed,
+                      authUser: _authUser,
+                      isSigningIn: _isSigningIn,
+                      onSignInPressed: _handleSignInPressed,
+                      onSignOutPressed: _handleSignOutPressed,
                     ),
                     _NotificationSettingsTab(
                       settings: _draftSettings,

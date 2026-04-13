@@ -624,15 +624,15 @@ class _PlantRootPageState extends State<PlantRootPage> {
     await _syncNotificationPermissionState(showToast: false);
   }
 
-  Future<void> _handlePlatformSignIn() async {
-    if (_isSigningIn) return;
+  Future<AppAuthUser?> _handlePlatformSignIn() async {
+    if (_isSigningIn) return null;
     final l10n = AppLocalizations.of(context);
     setState(() {
       _isSigningIn = true;
     });
     try {
       final user = await AuthService.instance.signInForCurrentPlatform();
-      if (!mounted) return;
+      if (!mounted) return null;
       if (user != null) {
         String? syncToast;
         await AuthSessionService.saveUser(user);
@@ -651,7 +651,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
         final hasLocalData = _plants.isNotEmpty;
         if (profile.exists && hasLocalData) {
           final resolution = await _showSyncChoiceDialog(profile: profile);
-          if (!mounted || resolution == null) return;
+          if (!mounted || resolution == null) return null;
           switch (resolution) {
             case _SyncResolution.server:
               await _applySyncedData(
@@ -722,9 +722,10 @@ class _PlantRootPageState extends State<PlantRootPage> {
                 user.provider == 'google' ? 'Google' : 'Apple',
               ),
         );
+        return user;
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       _showToast(l10n.syncFailed);
     } finally {
       if (mounted) {
@@ -733,6 +734,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
         });
       }
     }
+    return null;
   }
 
   Future<void> _handleSignOut() async {
