@@ -1,12 +1,11 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:photo_manager/photo_manager.dart';
 
 import 'ad_service.dart';
 import 'app_localizations.dart';
@@ -16,10 +15,10 @@ import 'auth_session_service.dart';
 import 'auth_service.dart';
 import 'firebase_service.dart';
 import 'notification_service.dart';
-import 'photo_picker_page.dart';
 import 'plant_detail_page.dart';
 import 'plant_models.dart';
 import 'plant_preset_service.dart';
+import 'plant_photo_service.dart';
 import 'plant_photo_widgets.dart';
 import 'plant_sync_service.dart';
 import 'plant_storage_service.dart';
@@ -2899,14 +2898,14 @@ class _PlantEditSheetState extends State<PlantEditSheet> {
   }
 
   Future<void> _openPhotoPicker() async {
-    final result = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(
-        builder: (_) => PhotoPickerPage(initialSelectedIds: _photoAssetIds),
-      ),
-    );
-    if (result != null) {
+    final result = await PlantPhotoService.pickAndStoreImages();
+    if (result.isNotEmpty) {
       setState(() {
-        _photoAssetIds = result;
+        _photoAssetIds = [
+          ..._photoAssetIds,
+          for (final path in result)
+            if (!_photoAssetIds.contains(path)) path,
+        ];
       });
     }
   }
@@ -7014,112 +7013,21 @@ class _ViewerAssetImage extends StatefulWidget {
 }
 
 class _ViewerAssetImageState extends State<_ViewerAssetImage> {
-  static final Map<String, Future<AssetEntity?>> _entityFutures =
-      <String, Future<AssetEntity?>>{};
-  static final Map<String, Future<Uint8List?>> _thumbFutures =
-      <String, Future<Uint8List?>>{};
-
-  Uint8List? _currentBytes;
-  bool _isLoading = true;
-  String? _activeAssetId;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAsset();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ViewerAssetImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.assetId != widget.assetId ||
-        oldWidget.width != widget.width ||
-        oldWidget.height != widget.height) {
-      _loadAsset();
-    }
-  }
-
-  Future<void> _loadAsset() async {
-    final assetId = widget.assetId;
-    _activeAssetId = assetId;
-    if (mounted) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
-
-    final cacheWidth = widget.width.isFinite
-        ? widget.width.round().clamp(1, 2048)
-        : 1080;
-    final cacheHeight = widget.height.isFinite
-        ? widget.height.round().clamp(1, 2048)
-        : 1440;
-    final entityFuture = _entityFutures.putIfAbsent(
-      assetId,
-      () => AssetEntity.fromId(assetId),
-    );
-    final entity = await entityFuture;
-    if (!mounted || _activeAssetId != assetId) {
-      return;
-    }
-    if (entity == null) {
-      setState(() {
-        _currentBytes = null;
-        _isLoading = false;
-      });
-      return;
-    }
-
-    final thumbKey = '$assetId:$cacheWidth:$cacheHeight';
-    final thumbFuture = _thumbFutures.putIfAbsent(
-      thumbKey,
-      () => entity.thumbnailDataWithSize(
-        ThumbnailSize(cacheWidth, cacheHeight),
-      ),
-    );
-    final data = await thumbFuture;
-    if (!mounted || _activeAssetId != assetId) {
-      return;
-    }
-    setState(() {
-      _currentBytes = data;
-      _isLoading = false;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (_currentBytes != null)
-          Image.memory(
-            _currentBytes!,
-            width: widget.width,
-            height: widget.height,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            filterQuality: FilterQuality.medium,
-          )
-        else
+    final file = File(widget.assetId);
+    if (!file.existsSync()) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return Image.file(
+      file,
+      width: widget.width,
+      height: widget.height,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (context, error, stackTrace) =>
           const ColoredBox(color: Colors.black),
-        if (_isLoading)
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.18),
-            ),
-            child: const Center(
-              child: SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

@@ -1,7 +1,6 @@
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:photo_manager/photo_manager.dart';
 
 class PlantPhotoThumb extends StatelessWidget {
   const PlantPhotoThumb({
@@ -17,46 +16,24 @@ class PlantPhotoThumb extends StatelessWidget {
   final double height;
   final double borderRadius;
 
-  static final Map<String, Future<AssetEntity?>> _entityFutures = <String, Future<AssetEntity?>>{};
-  static final Map<String, Future<Uint8List?>> _thumbnailFutures = <String, Future<Uint8List?>>{};
-
   @override
   Widget build(BuildContext context) {
-    final cacheWidth = width.isFinite ? width.round().clamp(1, 512) : 300;
-    final cacheHeight = height.isFinite ? height.round().clamp(1, 512) : 300;
-    final entityFuture = _entityFutures.putIfAbsent(assetId, () => AssetEntity.fromId(assetId));
+    final file = File(assetId);
+    if (!file.existsSync()) {
+      return _fallback();
+    }
 
-    return FutureBuilder<AssetEntity?>(
-      future: entityFuture,
-      builder: (context, snapshot) {
-        final entity = snapshot.data;
-        if (entity == null) {
-          return _fallback();
-        }
-        final thumbKey = '$assetId:$cacheWidth:$cacheHeight';
-        final thumbFuture = _thumbnailFutures.putIfAbsent(
-          thumbKey,
-          () => entity.thumbnailDataWithSize(ThumbnailSize(cacheWidth, cacheHeight)),
-        );
-        return FutureBuilder<Uint8List?>(
-          future: thumbFuture,
-          builder: (context, thumbSnapshot) {
-            final data = thumbSnapshot.data;
-            if (data == null) return _fallback();
-            return ClipRRect(
-              borderRadius: BorderRadius.circular(borderRadius),
-              child: Image.memory(
-                data,
-                width: width,
-                height: height,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                filterQuality: FilterQuality.medium,
-              ),
-            );
-          },
-        );
-      },
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: Image.file(
+        file,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (context, error, stackTrace) => _fallback(),
+      ),
     );
   }
 
