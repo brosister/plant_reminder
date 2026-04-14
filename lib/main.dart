@@ -56,6 +56,9 @@ class PlantReminderApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F855A)),
         scaffoldBackgroundColor: const Color(0xFFF6FBF7),
+        appBarTheme: const AppBarTheme(
+          centerTitle: false,
+        ),
         dialogTheme: DialogThemeData(
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
