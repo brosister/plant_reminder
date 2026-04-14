@@ -105,6 +105,11 @@ class AppUserIdentityService {
     await prefs.setString(_identityKey, jsonEncode(identity.toJson()));
   }
 
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_identityKey);
+  }
+
   static String _buildDeviceSerial(String uuid) {
     if (Platform.isIOS) {
       return 'I_iPhone_$uuid';
@@ -155,6 +160,28 @@ class AppUserService {
         profileImage: authUser.profileImageUrl,
       ),
     );
+  }
+
+  static Future<void> deleteAccount(AppAuthUser authUser) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/api/plant-reminder/users/delete'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider': authUser.provider,
+        'social_id': authUser.id,
+        'email': authUser.email,
+        'app_name': _appName,
+      }),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('account delete failed');
+    }
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    if (body['success'] != true) {
+      throw Exception((body['message'] ?? 'account delete failed').toString());
+    }
   }
 
   static Future<AppUserIdentity> _postIdentity(

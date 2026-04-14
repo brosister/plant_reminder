@@ -31,4 +31,10 @@ class PlantStorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_activityLogKey, PlantActivityEntry.encodeList(items));
   }
+
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_plantsKey);
+    await prefs.remove(_activityLogKey);
+  }
 }

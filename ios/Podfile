@@ -34,5 +34,13 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
+    # Ensure dSYM generation for all Pod frameworks in Release/Profile.
+    # This prevents App Store / Xcode Organizer warnings like:
+    # "The archive did not include a dSYM for <framework> with the UUIDs [...]"
+    target.build_configurations.each do |config|
+      next unless ['Release', 'Profile'].include?(config.name)
+      config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym'
+    end
   end
 end

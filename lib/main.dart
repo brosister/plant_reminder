@@ -118,6 +118,7 @@ class _PlantRootPageState extends State<PlantRootPage> {
   AppAuthUser? _authUser;
   AppUserIdentity? _appUserIdentity;
   bool _isSigningIn = false;
+  bool _isDeletingAccount = false;
   bool _isSyncing = false;
   bool _isLoading = true;
   List<PlantPreset> _plantPresets = List<PlantPreset>.from(kPlantPresets);
@@ -525,14 +526,67 @@ class _PlantRootPageState extends State<PlantRootPage> {
         return SettingsDialog(
           authUser: _authUser,
           isSigningIn: _isSigningIn,
+          isDeletingAccount: _isDeletingAccount,
           settings: _settings,
           onSendTestNotification: _sendTestNotification,
           onSignInPressed: _handlePlatformSignIn,
           onSignOutPressed: _handleSignOut,
+          onDeleteAccountPressed: _handleDeleteAccount,
           onSettingsChanged: _handleSettingsChanged,
         );
       },
     );
+  }
+
+  Future<bool> _handleDeleteAccount() async {
+    final l10n = context.l10n;
+    final user = _authUser;
+    if (user == null) return false;
+    if (_isDeletingAccount) return false;
+
+    setState(() {
+      _isDeletingAccount = true;
+    });
+
+    try {
+      await AppUserService.deleteAccount(user);
+      await AuthService.instance.unlink(provider: user.provider);
+
+      await AuthSessionService.clear();
+      await SyncStateService.clear();
+      await PlantStorageService.clear();
+      await AppUserIdentityService.clear();
+
+      _plants.clear();
+      _activityLog = [];
+
+      final newIdentity = await AppUserIdentityService.ensureIdentity();
+      try {
+        _appUserIdentity = await AppUserService.registerDeviceUser(newIdentity);
+        await AppUserIdentityService.save(_appUserIdentity!);
+      } catch (_) {
+        _appUserIdentity = newIdentity;
+      }
+
+      if (!mounted) return true;
+      setState(() {
+        _authUser = null;
+      });
+      await NotificationService.rescheduleForPlants(_plants, settings: _settings);
+      _showToast(l10n.deleteAccountSuccess);
+      return true;
+    } catch (_) {
+      if (mounted) {
+        _showToast(l10n.deleteAccountFailure);
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDeletingAccount = false;
+        });
+      }
+    }
   }
 
   Future<_SyncResolution?> _showSyncChoiceDialog({

@@ -11,19 +11,23 @@ class SettingsDialog extends StatefulWidget {
     super.key,
     required this.authUser,
     required this.isSigningIn,
+    required this.isDeletingAccount,
     required this.settings,
     required this.onSendTestNotification,
     required this.onSignInPressed,
     required this.onSignOutPressed,
+    required this.onDeleteAccountPressed,
     required this.onSettingsChanged,
   });
 
   final AppAuthUser? authUser;
   final bool isSigningIn;
+  final bool isDeletingAccount;
   final AppSettings settings;
   final Future<void> Function() onSendTestNotification;
   final Future<AppAuthUser?> Function() onSignInPressed;
   final Future<void> Function() onSignOutPressed;
+  final Future<bool> Function() onDeleteAccountPressed;
   final Future<void> Function(AppSettings settings) onSettingsChanged;
 
   @override
@@ -34,6 +38,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late AppSettings _draftSettings;
   AppAuthUser? _authUser;
   late bool _isSigningIn;
+  late bool _isDeletingAccount;
 
   @override
   void initState() {
@@ -41,6 +46,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _draftSettings = widget.settings;
     _authUser = widget.authUser;
     _isSigningIn = widget.isSigningIn;
+    _isDeletingAccount = widget.isDeletingAccount;
   }
 
   @override
@@ -54,6 +60,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
     }
     if (oldWidget.isSigningIn != widget.isSigningIn) {
       _isSigningIn = widget.isSigningIn;
+    }
+    if (oldWidget.isDeletingAccount != widget.isDeletingAccount) {
+      _isDeletingAccount = widget.isDeletingAccount;
     }
   }
 
@@ -90,6 +99,29 @@ class _SettingsDialogState extends State<SettingsDialog> {
     setState(() {
       _authUser = null;
     });
+  }
+
+  Future<void> _handleDeleteAccountPressed() async {
+    if (_isDeletingAccount) return;
+    setState(() {
+      _isDeletingAccount = true;
+    });
+    try {
+      final deleted = await widget.onDeleteAccountPressed();
+      if (!mounted) return;
+      if (deleted) {
+        setState(() {
+          _authUser = null;
+        });
+        Navigator.of(context).pop();
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDeletingAccount = false;
+        });
+      }
+    }
   }
 
   @override
@@ -142,8 +174,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     _AccountSettingsTab(
                       authUser: _authUser,
                       isSigningIn: _isSigningIn,
+                      isDeletingAccount: _isDeletingAccount,
                       onSignInPressed: _handleSignInPressed,
                       onSignOutPressed: _handleSignOutPressed,
+                      onDeleteAccountPressed: _handleDeleteAccountPressed,
                     ),
                     _NotificationSettingsTab(
                       settings: _draftSettings,
@@ -175,14 +209,18 @@ class _AccountSettingsTab extends StatelessWidget {
   const _AccountSettingsTab({
     required this.authUser,
     required this.isSigningIn,
+    required this.isDeletingAccount,
     required this.onSignInPressed,
     required this.onSignOutPressed,
+    required this.onDeleteAccountPressed,
   });
 
   final AppAuthUser? authUser;
   final bool isSigningIn;
+  final bool isDeletingAccount;
   final Future<void> Function() onSignInPressed;
   final Future<void> Function() onSignOutPressed;
+  final Future<void> Function() onDeleteAccountPressed;
 
   void _showPrivacyPolicyDialog(BuildContext context) {
     final l10n = context.l10n;
@@ -238,6 +276,35 @@ class _AccountSettingsTab extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _confirmAndDeleteAccount(BuildContext context) async {
+    final l10n = context.l10n;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(l10n.deleteAccountConfirmTitle),
+          content: Text(l10n.deleteAccountConfirmBody),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.close),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFDC2626),
+              ),
+              child: Text(l10n.deleteAccount),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+    await onDeleteAccountPressed();
   }
 
   @override
@@ -357,6 +424,28 @@ class _AccountSettingsTab extends StatelessWidget {
                           minimumSize: const Size.fromHeight(52),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: isDeletingAccount
+                            ? null
+                            : () => _confirmAndDeleteAccount(context),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFDC2626),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        child: Text(
+                          l10n.deleteAccount,
+                          style: const TextStyle(
+                            decoration: TextDecoration.underline,
                           ),
                         ),
                       ),

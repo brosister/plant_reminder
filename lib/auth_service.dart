@@ -106,4 +106,18 @@ class AuthService {
       await _googleSignIn.signOut();
     }
   }
+
+  Future<void> unlink({required String provider}) async {
+    if (provider == 'google') {
+      try {
+        await _googleSignIn.disconnect();
+      } catch (_) {
+        // disconnect는 이미 연결이 끊긴 경우 예외가 날 수 있어 무시합니다.
+      }
+      await _googleSignIn.signOut();
+      return;
+    }
+
+    // Apple은 앱에서 세션을 유지하지 않으므로 로컬 세션 정리만 수행합니다.
+  }
 }

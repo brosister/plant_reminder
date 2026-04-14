@@ -66,6 +66,11 @@ class AppLocalizations {
       'googleLinked': '구글 계정 연동됨',
       'appleLinked': '애플 계정 연동됨',
       'logout': '로그아웃',
+      'deleteAccount': '계정 삭제',
+      'deleteAccountConfirmTitle': '계정을 삭제할까요?',
+      'deleteAccountConfirmBody': '계정을 삭제하면 클라우드에 저장된 식물/활동 기록과 계정 정보가 즉시 삭제되며 복구할 수 없습니다.',
+      'deleteAccountSuccess': '계정이 삭제되었습니다.',
+      'deleteAccountFailure': '계정 삭제에 실패했습니다. 잠시 후 다시 시도해주세요.',
       'useWateringNotification': '물주기 알림 사용',
       'useWateringNotificationHint': '등록한 식물의 다음 물주기 시점에 로컬 알림을 보냅니다.',
       'defaultNotificationTime': '기본 알림 시간',
@@ -248,6 +253,11 @@ class AppLocalizations {
       'googleLinked': 'Google account linked',
       'appleLinked': 'Apple account linked',
       'logout': 'Sign out',
+      'deleteAccount': 'Delete Account',
+      'deleteAccountConfirmTitle': 'Delete your account?',
+      'deleteAccountConfirmBody': 'This will permanently delete your account and all cloud data. This action cannot be undone.',
+      'deleteAccountSuccess': 'Account deleted.',
+      'deleteAccountFailure': 'Failed to delete account. Please try again.',
       'useWateringNotification': 'Enable watering reminders',
       'useWateringNotificationHint': 'Send a local reminder when a registered plant reaches its next watering time.',
       'defaultNotificationTime': 'Default reminder time',
@@ -430,6 +440,11 @@ class AppLocalizations {
       'googleLinked': 'Googleアカウント連携済み',
       'appleLinked': 'Appleアカウント連携済み',
       'logout': 'ログアウト',
+      'deleteAccount': 'アカウント削除',
+      'deleteAccountConfirmTitle': 'アカウントを削除しますか？',
+      'deleteAccountConfirmBody': 'アカウントとクラウドに保存されたデータが完全に削除され、元に戻せません。',
+      'deleteAccountSuccess': 'アカウントを削除しました。',
+      'deleteAccountFailure': 'アカウント削除に失敗しました。もう一度お試しください。',
       'useWateringNotification': '水やり通知を使用',
       'useWateringNotificationHint': '登録した植物の次の水やり時間にローカル通知を送ります。',
       'defaultNotificationTime': '基本通知時間',
@@ -544,6 +559,11 @@ class AppLocalizations {
       'googleLinked': '已绑定 Google 账号',
       'appleLinked': '已绑定 Apple 账号',
       'logout': '退出登录',
+      'deleteAccount': '删除账号',
+      'deleteAccountConfirmTitle': '要删除账号吗？',
+      'deleteAccountConfirmBody': '这将永久删除你的账号以及云端数据，且无法恢复。',
+      'deleteAccountSuccess': '账号已删除。',
+      'deleteAccountFailure': '删除账号失败，请稍后重试。',
       'useWateringNotification': '启用浇水提醒',
       'useWateringNotificationHint': '当已登记植物到达下次浇水时间时发送本地通知。',
       'defaultNotificationTime': '默认提醒时间',
@@ -659,6 +679,11 @@ class AppLocalizations {
   String get googleLinked => _text('googleLinked');
   String get appleLinked => _text('appleLinked');
   String get logout => _text('logout');
+  String get deleteAccount => _text('deleteAccount');
+  String get deleteAccountConfirmTitle => _text('deleteAccountConfirmTitle');
+  String get deleteAccountConfirmBody => _text('deleteAccountConfirmBody');
+  String get deleteAccountSuccess => _text('deleteAccountSuccess');
+  String get deleteAccountFailure => _text('deleteAccountFailure');
   String get useWateringNotification => _text('useWateringNotification');
   String get useWateringNotificationHint => _text('useWateringNotificationHint');
   String get defaultNotificationTime => _text('defaultNotificationTime');
