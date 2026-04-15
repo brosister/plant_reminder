@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 class FirebaseService {
   FirebaseService._();
@@ -7,7 +8,12 @@ class FirebaseService {
 
   static Future<void> init() async {
     if (_initialized) return;
-    debugPrint('Firebase 초기화는 google-services.json / GoogleService-Info.plist 연결 후 활성화됩니다.');
+    try {
+      await Firebase.initializeApp();
+      debugPrint('Firebase initialized');
+    } catch (error) {
+      debugPrint('Firebase init skipped/failed: $error');
+    }
     _initialized = true;
   }
 }
